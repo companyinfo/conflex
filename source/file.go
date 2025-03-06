@@ -16,10 +16,10 @@
 package source
 
 import (
-	"companyinfo.dev/conflex/codec"
 	"context"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
+	"go.companyinfo.dev/conflex/codec"
 	"log"
 	"os"
 	"time"
@@ -68,7 +68,7 @@ func (f *File) Load(context.Context) (map[string]any, error) {
 }
 
 // Watch monitors the configuration file for changes and reloads the file when it is modified.
-func (f *File) Watch(ctx context.Context) error {
+func (f *File) Watch(_ context.Context) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err

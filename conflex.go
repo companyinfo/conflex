@@ -16,9 +16,6 @@
 package conflex
 
 import (
-	"companyinfo.dev/conflex/codec"
-	"companyinfo.dev/conflex/dumper"
-	"companyinfo.dev/conflex/source"
 	"context"
 	"dario.cat/mergo"
 	"errors"
@@ -26,6 +23,9 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/hashicorp/consul/api"
 	"github.com/spf13/cast"
+	"go.companyinfo.dev/conflex/codec"
+	"go.companyinfo.dev/conflex/dumper"
+	"go.companyinfo.dev/conflex/source"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +48,7 @@ type Conflex struct {
 	mu       sync.RWMutex
 }
 
+// WithSource returns an Option that configures the Conflex instance to add a source for loading configuration data.
 func WithSource(loader Source) Option {
 	return func(c *Conflex) error {
 		c.sources = append(c.sources, loader)
@@ -55,6 +56,7 @@ func WithSource(loader Source) Option {
 	}
 }
 
+// WithDumper returns an Option that configures the Conflex instance to add a dumper for configuration data.
 func WithDumper(dumper Dumper) Option {
 	return func(c *Conflex) error {
 		c.dumpers = append(c.dumpers, dumper)
@@ -62,6 +64,7 @@ func WithDumper(dumper Dumper) Option {
 	}
 }
 
+// WithFileDumper returns an Option that configures the Conflex instance to dump configuration data to a file.
 func WithFileDumper(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		encoder, err := codec.GetEncoder(codecType)
@@ -74,6 +77,7 @@ func WithFileDumper(path string, codecType codec.Type) Option {
 	}
 }
 
+// WithFileSource returns an Option that configures the Conflex instance to load configuration data from a file.
 func WithFileSource(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
@@ -86,6 +90,7 @@ func WithFileSource(path string, codecType codec.Type) Option {
 	}
 }
 
+// WithContentSource returns an Option that configures the Conflex instance to load configuration data from a byte slice.
 func WithContentSource(data []byte, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
@@ -98,6 +103,8 @@ func WithContentSource(data []byte, codecType codec.Type) Option {
 	}
 }
 
+// WithOSEnvVarSource returns an Option that configures the Conflex instance to load configuration data from environment variables.
+// The prefix parameter specifies the prefix for the environment variables to be loaded.
 func WithOSEnvVarSource(prefix string) Option {
 	return func(c *Conflex) error {
 		c.sources = append(c.sources, source.NewOSEnvVar(prefix))
@@ -183,6 +190,7 @@ func (c *Conflex) Load(ctx context.Context) error {
 	return nil
 }
 
+// Dump writes the current configuration values to the registered dumpers.
 func (c *Conflex) Dump(ctx context.Context) error {
 	for _, d := range c.dumpers {
 		if err := d.Dump(ctx, c.Values()); err != nil {
@@ -246,6 +254,7 @@ func (c *Conflex) getValueFromMap(path string) any {
 	return nil
 }
 
+// Watch starts watching the configuration sources for changes.
 func (c *Conflex) Watch(ctx context.Context) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(c.sources))
@@ -278,12 +287,17 @@ func (c *Conflex) Watch(ctx context.Context) error {
 	return nil
 }
 
+// Update represents a configuration update, containing information about the source,
+// path, and new value of the updated configuration.
 type Update struct {
 	Source string
 	Path   string
 	Value  interface{}
 }
 
+// OnUpdate registers a callback function that will be called whenever a configuration
+// update occurs. The callback function will be passed an Update struct containing
+// information about the update.
 func (c *Conflex) OnUpdate(fn func(Update)) {
 	ch := make(chan Update, 1)
 	c.mu.Lock()

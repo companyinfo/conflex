@@ -20,7 +20,7 @@ handling application settings across different environments and formats.
 ## Installation
 
 ```shell
-go get companyinfo.dev/conflex
+go get go.companyinfo.dev/conflex
 ```
 
 ## Quick Start
@@ -29,8 +29,8 @@ go get companyinfo.dev/conflex
 package main
 
 import (
-	"companyinfo.dev/conflex"
-	"companyinfo.dev/conflex/codec"
+	"go.companyinfo.dev/conflex"
+	"go.companyinfo.dev/conflex/codec"
 	"context"
 	"log"
 )

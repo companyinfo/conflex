@@ -22,6 +22,7 @@
         name = "conflex";
         buildInputs = with pkgs; [
           go
+          revive
           consul
         ];
       };

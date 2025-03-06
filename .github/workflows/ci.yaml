@@ -1,0 +1,57 @@
+name: Conflex CI
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set up Go 1.23.x
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.23.x
+        cache-dependency-path: go.sum
+
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: go-fmt
+      run: |
+        if [ -n "$(gofmt -s -l .)" ]; then
+          echo "Go code is not formatted, run 'gofmt -s -w .'"
+          exit 1
+        fi
+
+    - name: go-vet
+      run: go vet ./...
+
+    - name: revive
+      run: |
+        go install github.com/mgechev/revive@v1.3.2
+        revive -config .revive.toml -formatter friendly ./...
+
+  test:
+    name: Test
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Go 1.23.x
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.23.x
+        cache-dependency-path: go.sum
+
+    - name: Test Conflex
+      run: go test -v -covermode=count -coverprofile=coverage.out ./...

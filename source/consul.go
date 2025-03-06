@@ -16,10 +16,10 @@
 package source
 
 import (
-	"companyinfo.dev/conflex/codec"
 	"context"
 	"fmt"
 	"github.com/hashicorp/consul/api"
+	"go.companyinfo.dev/conflex/codec"
 	"strings"
 )
 

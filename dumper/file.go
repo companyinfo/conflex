@@ -16,9 +16,9 @@
 package dumper
 
 import (
-	"companyinfo.dev/conflex/codec"
 	"context"
 	"fmt"
+	"go.companyinfo.dev/conflex/codec"
 	"os"
 )
 

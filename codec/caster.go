@@ -23,6 +23,7 @@ import (
 // CastType is a string type that represents the type of a value that can be cast.
 type CastType string
 
+// revive:disable:exported
 const (
 	CastTypeBool       CastType = "bool"
 	TypeCasterBool     Type     = "caster-bool"

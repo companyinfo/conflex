@@ -1,4 +1,4 @@
-module companyinfo.dev/conflex
+module go.companyinfo.dev/conflex
 
 go 1.23.3
 
