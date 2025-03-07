@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/hashicorp/consul/api"
 	"github.com/spf13/cast"
 	"go.companyinfo.dev/conflex/codec"
 	"go.companyinfo.dev/conflex/dumper"
@@ -113,16 +112,19 @@ func WithOSEnvVarSource(prefix string) Option {
 }
 
 // WithConsulSource returns an Option that configures the Conflex instance to load configuration data from a Consul server.
-// The address parameter specifies the address of the Consul server, and the path parameter specifies the path to the configuration data in Consul.
-// If there is an error creating the Consul loader, the error is returned.
-func WithConsulSource(config *api.Config, path string, codecType codec.Type) Option {
+// The path parameter specifies the key path in Consul's key-value store to load configuration from.
+// The codecType parameter specifies the codec type (e.g., JSON, YAML) to use for decoding the configuration data.
+// Required environment variables:
+//   - CONSUL_HTTP_ADDR: The address of the Consul server (e.g., "http://localhost:8500")
+//   - CONSUL_HTTP_TOKEN: The access token for authentication with Consul (optional)
+func WithConsulSource(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
 		if err != nil {
 			return fmt.Errorf("failed to get decoder: %w", err)
 		}
 
-		l, err := source.NewConsul(config, path, decoder)
+		l, err := source.NewConsul(path, decoder)
 		if err != nil {
 			return err
 		}

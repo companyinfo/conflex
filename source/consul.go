@@ -32,13 +32,9 @@ type Consul struct {
 	decoder   codec.Decoder
 }
 
-// NewConsul creates a new Consul configuration source with the given configuration and path.
-func NewConsul(config *api.Config, path string, decoder codec.Decoder) (*Consul, error) {
-	if config == nil {
-		config = api.DefaultConfig()
-	}
-
-	client, err := api.NewClient(config)
+// NewConsul creates a new Consul configuration source with the given path and decoder.
+func NewConsul(path string, decoder codec.Decoder) (*Consul, error) {
+	client, err := api.NewClient(api.DefaultConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consul client: %w", err)
 	}

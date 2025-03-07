@@ -43,7 +43,7 @@ func main() {
 		conflex.WithFileSource("config.json", codec.TypeJSON),
 		// By default, it will use the Consul API client and 
 		// lookup CONSUL_HTTP_ADDR and CONSUL_HTTP_TOKEN environment variables
-		conflex.WithConsulSource(nil, "staging/service", codec.TypeJSON),
+		conflex.WithConsulSource("staging/service", codec.TypeJSON),
 	)
 	if err != nil {
 		log.Fatalf("failed to create configuration: %v", err)
