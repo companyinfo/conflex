@@ -1,12 +1,13 @@
 module go.companyinfo.dev/conflex
 
 go 1.23.3
+toolchain go1.24.1
 
 require (
 	dario.cat/mergo v1.0.1
 	github.com/fsnotify/fsnotify v1.8.0
 	github.com/go-viper/mapstructure/v2 v2.2.1
-	github.com/goccy/go-yaml v1.16.0
+	github.com/goccy/go-yaml v1.17.1
 	github.com/hashicorp/consul/api v1.31.2
 	github.com/spf13/cast v1.7.1
 	github.com/stretchr/testify v1.10.0
