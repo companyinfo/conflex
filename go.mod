@@ -10,7 +10,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/goccy/go-yaml v1.17.1
 	github.com/hashicorp/consul/api v1.32.0
-	github.com/spf13/cast v1.7.1
+	github.com/spf13/cast v1.8.0
 	github.com/stretchr/testify v1.10.0
 )
 
