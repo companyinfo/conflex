@@ -238,6 +238,10 @@ err := cfg.Load(context.Background()) // Will return error if validation fails
 
 ### 2. JSON Schema Validation (for Maps)
 
+> **What is JSON Schema?**  
+> [JSON Schema](https://json-schema.org/) is a standard for describing the structure and validation rules of JSON data. It allows you to define required fields, data types, value constraints, and more, making it easy to validate configuration files and catch errors early.  
+> Learn more at [json-schema.org](https://json-schema.org/).
+
 You can validate the loaded configuration map against a JSON Schema using [`github.com/santhosh-tekuri/jsonschema/v6`](https://github.com/santhosh-tekuri/jsonschema):
 
 > **Note:** JSON Schema validation in Conflex is applied to the merged configuration map (`map[string]any`), not directly to Go structs. Schema validation happens before any struct binding. If you want to validate your struct, use the struct-based `Validate() error` method described above.
