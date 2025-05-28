@@ -119,6 +119,69 @@ cfg.Load(context.Background())
 cfg.Dump(context.Background()) // Writes merged config to out.yaml
 ```
 
+## Custom Codecs
+
+Conflex allows you to extend configuration support to any format by registering your own codecs.
+
+### Implementing a Custom Codec
+
+A codec must implement the following interface:
+
+```go
+type Codec interface {
+    Encode(v any) ([]byte, error)
+    Decode(data []byte, v any) error
+}
+```
+
+### Example: Registering a Custom Codec
+
+Suppose you want to support a custom format called `mytype`:
+
+```go
+package mycodec
+
+import (
+    "go.companyinfo.dev/conflex/codec"
+)
+
+type MyCodec struct{}
+
+func (MyCodec) Encode(v any) ([]byte, error) {
+    // ... your encoding logic ...
+}
+
+func (MyCodec) Decode(data []byte, v any) error {
+    // ... your decoding logic ...
+}
+
+func init() {
+    codec.RegisterEncoder("mytype", MyCodec{})
+    codec.RegisterDecoder("mytype", MyCodec{})
+}
+```
+
+Then, in your application:
+
+```go
+import (
+    _ "yourmodule/mycodec" // ensure init() runs
+    "go.companyinfo.dev/conflex"
+    "go.companyinfo.dev/conflex/codec"
+)
+
+cfg, _ := conflex.New(
+    conflex.WithFileSource("config.mytype", "mytype"),
+)
+```
+
+### When to Use a Custom Codec
+- Supporting formats not built-in (e.g., TOML, XML, encrypted configs)
+- Integrating with legacy or proprietary configuration formats
+- Adding validation or transformation logic during encode/decode
+
+**Tip:** If you build a useful codec, consider contributing it back to the community!
+
 ## Testing & Best Practices
 
 - Use the testify suite for unit and integration tests (see `*_test.go` files).
