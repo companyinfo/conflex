@@ -125,7 +125,7 @@ func WithConsulSource(path string, codecType codec.Type) Option {
 			return fmt.Errorf("failed to get decoder: %w", err)
 		}
 
-		l, err := source.NewConsul(path, decoder)
+		l, err := source.NewConsul(path, decoder, nil)
 		if err != nil {
 			return err
 		}

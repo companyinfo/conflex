@@ -18,9 +18,10 @@ package source
 import (
 	"context"
 	"fmt"
-	"go.companyinfo.dev/conflex/codec"
 	"os"
 	"strings"
+
+	"go.companyinfo.dev/conflex/codec"
 )
 
 // OSEnvVar is a struct that represents an environment variable loader with a prefix.
@@ -49,7 +50,7 @@ func (e *OSEnvVar) Load(_ context.Context) (map[string]any, error) {
 		validEnv = append(validEnv, strings.TrimPrefix(env, e.prefix))
 	}
 
-	data := strings.Join(os.Environ(), "\n")
+	data := strings.Join(validEnv, "\n")
 
 	var config map[string]any
 	if err := e.decoder.Decode([]byte(data), &config); err != nil {

@@ -18,14 +18,21 @@ package source
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/hashicorp/consul/api"
 	"go.companyinfo.dev/conflex/codec"
-	"strings"
 )
+
+// ConsulKV is an interface for Consul KV operations (for testability)
+type ConsulKV interface {
+	Get(key string, q *api.QueryOptions) (*api.KVPair, *api.QueryMeta, error)
+}
 
 // Consul is a struct that represents a Consul-based configuration source.
 type Consul struct {
 	client    *api.Client
+	kv        ConsulKV
 	path      string
 	onChange  func()
 	lastIndex uint64
@@ -33,14 +40,18 @@ type Consul struct {
 }
 
 // NewConsul creates a new Consul configuration source with the given path and decoder.
-func NewConsul(path string, decoder codec.Decoder) (*Consul, error) {
+// If kv is nil, it uses the default client.KV().
+func NewConsul(path string, decoder codec.Decoder, kv ConsulKV) (*Consul, error) {
 	client, err := api.NewClient(api.DefaultConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consul client: %w", err)
 	}
-
+	if kv == nil {
+		kv = client.KV()
+	}
 	return &Consul{
 		client:  client,
+		kv:      kv,
 		path:    path,
 		decoder: decoder,
 	}, nil
@@ -48,7 +59,7 @@ func NewConsul(path string, decoder codec.Decoder) (*Consul, error) {
 
 // Load retrieves the configuration data from the Consul key-value store at the specified path.
 func (c *Consul) Load(ctx context.Context) (map[string]any, error) {
-	pair, meta, err := c.client.KV().Get(c.path, (&api.QueryOptions{}).WithContext(ctx))
+	pair, meta, err := c.kv.Get(c.path, (&api.QueryOptions{}).WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get consul key: %w", err)
 	}

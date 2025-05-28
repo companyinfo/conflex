@@ -18,14 +18,12 @@ package source
 import (
 	"context"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
-	"go.companyinfo.dev/conflex/codec"
-	"log"
 	"os"
-	"time"
+
+	"go.companyinfo.dev/conflex/codec"
 )
 
-// File represents a configuration file that can be loaded and watched for changes.
+// File represents a configuration file that can be loaded.
 type File struct {
 	path    string
 	data    []byte
@@ -65,43 +63,4 @@ func (f *File) Load(context.Context) (map[string]any, error) {
 	}
 
 	return config, nil
-}
-
-// Watch monitors the configuration file for changes and reloads the file when it is modified.
-func (f *File) Watch(_ context.Context) error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-
-	defer func(watcher *fsnotify.Watcher) {
-		err := watcher.Close()
-		if err != nil {
-			fmt.Println("Failed to close watcher:", err)
-		}
-	}(watcher)
-
-	if err := watcher.Add(f.path); err != nil {
-		return err
-	}
-
-	var timer *time.Timer
-	for {
-		select {
-		case event := <-watcher.Events:
-			if event.Op&fsnotify.Write == fsnotify.Write {
-				if timer != nil {
-					timer.Stop()
-				}
-				timer = time.AfterFunc(100*time.Millisecond, func() {
-					log.Println("Reloading file:", f.path)
-				})
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return fmt.Errorf("watcher closed")
-			}
-			log.Println("error:", err)
-		}
-	}
 }
