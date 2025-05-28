@@ -16,6 +16,7 @@ handling application settings across different environments and formats.
 - **Type-Safe Retrieval**: Get values as specific types (`string`, `int`, `bool`, etc.), with error-returning options for robust handling.
 - **Configuration Dumping**: Save the effective configuration to files or other custom destinations.
 - **Clear Error Handling**: Provides comprehensive error information for easier debugging.
+- **Thread-Safe**: Safe for concurrent access and configuration loading in multi-goroutine applications.
 
 ## Installation
 
