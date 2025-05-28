@@ -42,9 +42,7 @@ type Conflex struct {
 	values   *map[string]any
 	sources  []Source
 	dumpers  []Dumper
-	watchers []chan Update
 	binding  any
-	target   any
 	mu       sync.RWMutex
 }
 
@@ -210,7 +208,7 @@ func (c *Conflex) bind() error {
 		return fmt.Errorf("failed to create decoder: %w", err)
 	}
 
-	if err := decoder.Decode(c.Values()); err != nil {
+	if err := decoder.Decode(c.values); err != nil {
 		return fmt.Errorf("failed to decode configuration: %w", err)
 	}
 
@@ -255,63 +253,6 @@ func (c *Conflex) getValueFromMap(path string) any {
 	}
 
 	return nil
-}
-
-// Watch starts watching the configuration sources for changes.
-func (c *Conflex) Watch(ctx context.Context) error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(c.sources))
-
-	for _, loader := range c.sources {
-		watcher, ok := loader.(Watcher)
-		if !ok {
-			continue
-		}
-
-		wg.Add(1)
-		go func(w Watcher) {
-			defer wg.Done()
-			if err := w.Watch(ctx); err != nil {
-				errCh <- err
-			}
-		}(watcher)
-	}
-
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-
-	// Return first error if any
-	for err := range errCh {
-		return err
-	}
-
-	return nil
-}
-
-// Update represents a configuration update, containing information about the source,
-// path, and new value of the updated configuration.
-type Update struct {
-	Source string
-	Path   string
-	Value  interface{}
-}
-
-// OnUpdate registers a callback function that will be called whenever a configuration
-// update occurs. The callback function will be passed an Update struct containing
-// information about the update.
-func (c *Conflex) OnUpdate(fn func(Update)) {
-	ch := make(chan Update, 1)
-	c.mu.Lock()
-	c.watchers = append(c.watchers, ch)
-	c.mu.Unlock()
-
-	go func() {
-		for update := range ch {
-			fn(update)
-		}
-	}()
 }
 
 // Get returns the value associated with the given key as an any type.
