@@ -16,11 +16,11 @@ handling application settings across different environments and formats.
 - [Advanced Usage](#advanced-usage)
 - [Custom Codecs](#custom-codecs)
 - [Validation](#validation)
+- [Real-World Example](#real-world-example)
+- [Sample Configuration Files](#sample-configuration-files)
 - [Testing & Best Practices](#testing--best-practices)
 - [Troubleshooting & FAQ](#troubleshooting--faq)
 - [Roadmap and Future Plans](#roadmap-and-future-plans)
-- [Real-World Example](#real-world-example)
-- [Sample Configuration Files](#sample-configuration-files)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -240,6 +240,8 @@ err := cfg.Load(context.Background()) // Will return error if validation fails
 
 You can validate the loaded configuration map against a JSON Schema using [`github.com/santhosh-tekuri/jsonschema/v6`](https://github.com/santhosh-tekuri/jsonschema):
 
+> **Note:** JSON Schema validation in Conflex is applied to the merged configuration map (`map[string]any`), not directly to Go structs. Schema validation happens before any struct binding. If you want to validate your struct, use the struct-based `Validate() error` method described above.
+
 ```go
 schemaBytes, err := os.ReadFile("schema.json")
 if err != nil {
@@ -276,48 +278,6 @@ cfg, _ := conflex.New(
 | Custom Function        | Yes                 | Yes                | `WithValidator(func) error`       |
 
 **Tip:** Validation helps prevent misconfiguration and makes your application more robust!
-
-## Testing & Best Practices
-
-- Use the testify suite for unit and integration tests (see `*_test.go` files).
-- Mock sources and dumpers for isolated tests.
-- Always check errors from `Load` and `Dump`.
-- For concurrency, `Conflex` is thread-safe for `Load` and `Get`.
-
-## Troubleshooting & FAQ
-
-**Q: Why is my struct not being populated?**
-- Make sure you pass a pointer to your struct to `WithBinding`.
-- Check your struct tags: use `conflex:"fieldname"`.
-
-**Q: How do I override config with environment variables?**
-- Use `WithOSEnvVarSource("PREFIX_")` and set env vars like `PREFIX_SERVER_PORT=8080`.
-
-**Q: How do I add a new config source or dumper?**
-- Implement the `Source` or `Dumper` interface and pass it to `WithSource` or `WithDumper`.
-
-**Q: How do I access nested values?**
-- Use dot notation: `cfg.Get("outer.inner.key")`.
-
-**Q: What happens if a source returns nil or an error?**
-- If a source returns an error, `Load` will return it. If a source returns nil, it is skipped.
-
-## Roadmap and Future Plans
-
-- [ ] **Additional Configuration Formats:**
-    - [ ] TOML (Tom's Obvious, Minimal Language)
-    - [ ] HCL (HashiCorp Configuration Language)
-    - [ ] INI
-- [ ] **Additional Configuration Sources:**
-    - [ ] Command-line flags (e.g., `--host=localhost`)
-    - [ ] HashiCorp Vault
-    - [ ] Etcd
-    - [ ] Apache ZooKeeper
-    - [ ] Redis / Valkey
-    - [ ] Memcached
-- [ ] **Advanced Features:**
-    - [ ] Hot reloading of configuration changes
-    - [ ] Decryption of sensitive configuration values (e.g., SOPS integration)
 
 ## Real-World Example
 
@@ -386,6 +346,48 @@ feature_enabled: true
   "feature_enabled": true
 }
 ```
+
+## Testing & Best Practices
+
+- Use the testify suite for unit and integration tests (see `*_test.go` files).
+- Mock sources and dumpers for isolated tests.
+- Always check errors from `Load` and `Dump`.
+- For concurrency, `Conflex` is thread-safe for `Load` and `Get`.
+
+## Troubleshooting & FAQ
+
+**Q: Why is my struct not being populated?**
+- Make sure you pass a pointer to your struct to `WithBinding`.
+- Check your struct tags: use `conflex:"fieldname"`.
+
+**Q: How do I override config with environment variables?**
+- Use `WithOSEnvVarSource("PREFIX_")` and set env vars like `PREFIX_SERVER_PORT=8080`.
+
+**Q: How do I add a new config source or dumper?**
+- Implement the `Source` or `Dumper` interface and pass it to `WithSource` or `WithDumper`.
+
+**Q: How do I access nested values?**
+- Use dot notation: `cfg.Get("outer.inner.key")`.
+
+**Q: What happens if a source returns nil or an error?**
+- If a source returns an error, `Load` will return it. If a source returns nil, it is skipped.
+
+## Roadmap and Future Plans
+
+- [ ] **Additional Configuration Formats:**
+    - [ ] TOML (Tom's Obvious, Minimal Language)
+    - [ ] HCL (HashiCorp Configuration Language)
+    - [ ] INI
+- [ ] **Additional Configuration Sources:**
+    - [ ] Command-line flags (e.g., `--host=localhost`)
+    - [ ] HashiCorp Vault
+    - [ ] Etcd
+    - [ ] Apache ZooKeeper
+    - [ ] Redis / Valkey
+    - [ ] Memcached
+- [ ] **Advanced Features:**
+    - [ ] Hot reloading of configuration changes
+    - [ ] Decryption of sensitive configuration values (e.g., SOPS integration)
 
 ## Contributing
 
