@@ -17,17 +17,18 @@ package conflex
 
 import (
 	"context"
-	"dario.cat/mergo"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"dario.cat/mergo"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/cast"
 	"go.companyinfo.dev/conflex/codec"
 	"go.companyinfo.dev/conflex/dumper"
 	"go.companyinfo.dev/conflex/source"
-	"strings"
-	"sync"
-	"time"
 )
 
 // Option is a functional option that can be used to configure a Conflex instance.
@@ -165,11 +166,11 @@ func New(options ...Option) (*Conflex, error) {
 }
 
 // Load loads configuration data from the registered sources and merges it into the internal values map.
-// The method acquires a read lock on the values map before loading the configuration data, and releases the lock before returning.
+// The method acquires a write lock on the values map before loading the configuration data, and releases the lock before returning.
 // If any of the sources fail to load the configuration data, the method returns the first encountered error.
 func (c *Conflex) Load(ctx context.Context) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	for _, l := range c.sources {
 		conf, err := l.Load(ctx)

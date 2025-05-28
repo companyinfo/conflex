@@ -17,6 +17,7 @@ package codec
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 )
 
@@ -38,6 +39,9 @@ func (EnvVarCodec) Decode(data []byte, v any) error {
 
 	for _, env := range bytes.Split(data, []byte("\n")) {
 		pair := strings.SplitN(string(env), "=", 2)
+		if len(pair) != 2 {
+			continue
+		}
 		key := pair[0]
 		parts := strings.Split(strings.ToLower(key), "_")
 
@@ -58,7 +62,11 @@ func (EnvVarCodec) Decode(data []byte, v any) error {
 		current[parts[len(parts)-1]] = pair[1]
 	}
 
-	v = conf
+	ptr, ok := v.(*map[string]any)
+	if !ok {
+		return fmt.Errorf("EnvVarCodec.Decode: expected *map[string]any, got %T", v)
+	}
+	*ptr = conf
 
 	return nil
 }
