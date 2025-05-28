@@ -83,7 +83,7 @@ type mockEncoder struct {
 	err error
 }
 
-func (m *mockEncoder) Encode(v any) ([]byte, error) {
+func (m *mockEncoder) Encode(_ any) ([]byte, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
