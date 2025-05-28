@@ -5,6 +5,8 @@
 Conflex (pronounced /ˈkɒnflɛks/) is a powerful and versatile configuration management package for Go that simplifies
 handling application settings across different environments and formats.
 
+> **Conflex is designed to help Go applications follow best practices for configuration management as recommended by the [Twelve-Factor App methodology](https://12factor.net/), especially [Factor III: Config](https://12factor.net/config).**
+
 ## Features
 
 - **Easy Integration**: Simple and intuitive API.
