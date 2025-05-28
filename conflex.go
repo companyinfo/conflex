@@ -39,11 +39,11 @@ type Option func(c *Conflex) error
 // The sources field is a slice of Source instances that are used to load the configuration data.
 // The mu field is a sync.RWMutex that is used to synchronize access to the configuration data.
 type Conflex struct {
-	values   *map[string]any
-	sources  []Source
-	dumpers  []Dumper
-	binding  any
-	mu       sync.RWMutex
+	values  *map[string]any
+	sources []Source
+	dumpers []Dumper
+	binding any
+	mu      sync.RWMutex
 }
 
 // WithSource returns an Option that configures the Conflex instance to add a source for loading configuration data.
