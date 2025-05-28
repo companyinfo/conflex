@@ -52,8 +52,8 @@ func (m *mockDumper) Dump(_ context.Context, values *map[string]any) error {
 }
 
 type bindStruct struct {
-	Foo string `config:"foo"`
-	Bar int    `config:"bar"`
+	Foo string `conflex:"foo"`
+	Bar int    `conflex:"bar"`
 }
 
 func (s *ConflexTestSuite) TestNewAndLoad_Success() {

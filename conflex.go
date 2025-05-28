@@ -203,7 +203,7 @@ func (c *Conflex) Dump(ctx context.Context) error {
 }
 
 func (c *Conflex) bind() error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "config", Result: c.binding})
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "conflex", Result: c.binding})
 	if err != nil {
 		return fmt.Errorf("failed to create decoder: %w", err)
 	}

@@ -74,8 +74,8 @@ Bind configuration directly to your own struct:
 
 ```go
 type Config struct {
-	Port int    `config:"server.port"`
-	Host string `config:"server.host"`
+	Port int    `conflex:"server.port"`
+	Host string `conflex:"server.host"`
 }
 
 var c Config
@@ -130,7 +130,7 @@ cfg.Dump(context.Background()) // Writes merged config to out.yaml
 
 **Q: Why is my struct not being populated?**
 - Make sure you pass a pointer to your struct to `WithBinding`.
-- Check your struct tags: use `config:"fieldname"`.
+- Check your struct tags: use `conflex:"fieldname"`.
 
 **Q: How do I override config with environment variables?**
 - Use `WithOSEnvVarSource("PREFIX_")` and set env vars like `PREFIX_SERVER_PORT=8080`.
