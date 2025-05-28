@@ -7,6 +7,25 @@ handling application settings across different environments and formats.
 
 > **Conflex is designed to help Go applications follow best practices for configuration management as recommended by the [Twelve-Factor App methodology](https://12factor.net/), especially [Factor III: Config](https://12factor.net/config).**
 
+---
+
+## Table of Contents
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Advanced Usage](#advanced-usage)
+- [Custom Codecs](#custom-codecs)
+- [Validation](#validation)
+- [Testing & Best Practices](#testing--best-practices)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
+- [Roadmap and Future Plans](#roadmap-and-future-plans)
+- [Real-World Example](#real-world-example)
+- [Sample Configuration Files](#sample-configuration-files)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Features
 
 - **Easy Integration**: Simple and intuitive API.
@@ -14,6 +33,7 @@ handling application settings across different environments and formats.
 - **Format Agnostic**: Supports JSON, YAML, and other formats via extensible codecs.
 - **Hierarchical Merging**: Configurations from multiple sources are merged, with later sources overriding earlier ones.
 - **Struct Binding**: Automatically map configuration data to Go structs.
+- **Built-in Validation**: Validate configuration using struct methods, JSON Schemas, or custom functions.
 - **Dot Notation Access**: Navigate nested configuration easily (e.g., `config.GetString("database.host")`).
 - **Type-Safe Retrieval**: Get values as specific types (`string`, `int`, `bool`, etc.), with error-returning options for robust handling.
 - **Configuration Dumping**: Save the effective configuration to files or other custom destinations.
@@ -182,6 +202,81 @@ cfg, _ := conflex.New(
 
 **Tip:** If you build a useful codec, consider contributing it back to the community!
 
+## Validation
+
+Conflex supports configuration validation to help catch errors early and ensure your application runs with correct settings.
+
+### 1. Struct-Based Validation
+
+If your binding struct implements the following interface, Conflex will call `Validate()` after binding:
+
+```go
+type Validator interface {
+    Validate() error
+}
+```
+
+**Example:**
+```go
+type MyConfig struct {
+    Port int `conflex:"port"`
+}
+
+func (c *MyConfig) Validate() error {
+    if c.Port <= 0 {
+        return errors.New("port must be positive")
+    }
+    return nil
+}
+
+cfg, _ := conflex.New(
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithBinding(&myConfig),
+)
+err := cfg.Load(context.Background()) // Will return error if validation fails
+```
+
+### 2. JSON Schema Validation (for Maps)
+
+You can validate the loaded configuration map against a JSON Schema using [`github.com/santhosh-tekuri/jsonschema/v6`](https://github.com/santhosh-tekuri/jsonschema):
+
+```go
+schemaBytes, err := os.ReadFile("schema.json")
+if err != nil {
+    log.Fatalf("failed to read schema: %v", err)
+}
+cfg, _ := conflex.New(
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithJSONSchema(schemaBytes),
+)
+```
+
+### 3. Custom Validation Functions
+
+You can register a custom validation function for either the bound struct or the config map:
+
+```go
+cfg, _ := conflex.New(
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithValidator(func(cfg map[string]any) error {
+        if cfg["port"].(int) <= 0 {
+            return errors.New("port must be positive")
+        }
+        return nil
+    }),
+)
+```
+
+### Summary Table
+
+| Validation Type         | For Structs         | For Maps           | How to Use                        |
+|------------------------|---------------------|--------------------|-----------------------------------|
+| Interface-based        | `Validate() error`  | —                  | Implement on struct               |
+| JSON Schema            | —                   | Yes                | `WithJSONSchema(schema)`          |
+| Custom Function        | Yes                 | Yes                | `WithValidator(func) error`       |
+
+**Tip:** Validation helps prevent misconfiguration and makes your application more robust!
+
 ## Testing & Best Practices
 
 - Use the testify suite for unit and integration tests (see `*_test.go` files).
@@ -223,7 +318,74 @@ cfg, _ := conflex.New(
 - [ ] **Advanced Features:**
     - [ ] Hot reloading of configuration changes
     - [ ] Decryption of sensitive configuration values (e.g., SOPS integration)
-    - [ ] Configuration validation (e.g., using JSON Schema)
+
+## Real-World Example
+
+This example demonstrates merging multiple sources (file, environment, Consul), using struct binding, validation, and a custom codec.
+
+```go
+import (
+    "context"
+    "go.companyinfo.dev/conflex"
+    "go.companyinfo.dev/conflex/codec"
+    _ "yourmodule/mycodec" // Register your custom codec
+)
+
+type Config struct {
+    Port int    `conflex:"server.port"`
+    Host string `conflex:"server.host"`
+}
+
+func (c *Config) Validate() error {
+    if c.Port <= 0 {
+        return errors.New("port must be positive")
+    }
+    return nil
+}
+
+var c Config
+cfg, err := conflex.New(
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithFileSource("config.json", codec.TypeJSON),
+    conflex.WithOSEnvVarSource("MYAPP_"),
+    conflex.WithConsulSource("production/service", codec.TypeJSON),
+    conflex.WithFileSource("config.mytype", "mytype"), // custom codec
+    conflex.WithBinding(&c),
+    conflex.WithValidator(func(m map[string]any) error {
+        if m["feature_enabled"] != true {
+            return errors.New("feature_enabled must be true")
+        }
+        return nil
+    }),
+)
+if err != nil {
+    log.Fatalf("failed to create configuration: %v", err)
+}
+if err := cfg.Load(context.Background()); err != nil {
+    log.Fatalf("failed to load configuration: %v", err)
+}
+```
+
+## Sample Configuration Files
+
+**YAML (`config.yaml`):**
+```yaml
+server:
+  port: 8080
+  host: localhost
+feature_enabled: true
+```
+
+**JSON (`config.json`):**
+```json
+{
+  "server": {
+    "port": 8080,
+    "host": "localhost"
+  },
+  "feature_enabled": true
+}
+```
 
 ## Contributing
 

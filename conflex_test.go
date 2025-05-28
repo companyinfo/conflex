@@ -295,3 +295,43 @@ func (s *ConflexTestSuite) TestGet_NestedDotNotation() {
 	v := c.Get("outer.inner.val")
 	s.Equal(42, v)
 }
+
+func (s *ConflexTestSuite) TestJSONSchemaValidation_Fails() {
+	schema := []byte(`{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"foo":{"type":"string"},"bar":{"type":"integer"}},"required":["foo","bar"]}`)
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": "notanint"}}
+	c, err := New(WithSource(src), WithJSONSchema(schema))
+	s.NoError(err)
+	s.Error(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestJSONSchemaValidation_Succeeds() {
+	schema := []byte(`{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"foo":{"type":"string"},"bar":{"type":"integer"}},"required":["foo","bar"]}`)
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42}}
+	c, err := New(WithSource(src), WithJSONSchema(schema))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestCustomValidator_Fails() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src), WithValidator(func(cfg map[string]any) error {
+		if cfg["foo"] != "baz" {
+			return errors.New("foo must be 'baz'")
+		}
+		return nil
+	}))
+	s.NoError(err)
+	s.Error(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestCustomValidator_Succeeds() {
+	src := &mockSource{conf: map[string]any{"foo": "baz"}}
+	c, err := New(WithSource(src), WithValidator(func(cfg map[string]any) error {
+		if cfg["foo"] != "baz" {
+			return errors.New("foo must be 'baz'")
+		}
+		return nil
+	}))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+}

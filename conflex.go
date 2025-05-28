@@ -19,12 +19,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
+	"bytes"
+
 	"dario.cat/mergo"
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cast"
 	"go.companyinfo.dev/conflex/codec"
 	"go.companyinfo.dev/conflex/dumper"
@@ -39,11 +43,14 @@ type Option func(c *Conflex) error
 // The sources field is a slice of Source instances that are used to load the configuration data.
 // The mu field is a sync.RWMutex that is used to synchronize access to the configuration data.
 type Conflex struct {
-	values  *map[string]any
-	sources []Source
-	dumpers []Dumper
-	binding any
-	mu      sync.RWMutex
+	values             *map[string]any
+	sources            []Source
+	dumpers            []Dumper
+	binding            any
+	mu                 sync.RWMutex
+	jsonSchema         string
+	jsonSchemaCompiled *jsonschema.Schema
+	customValidators   []func(map[string]any) error
 }
 
 // WithSource returns an Option that configures the Conflex instance to add a source for loading configuration data.
@@ -143,6 +150,38 @@ func WithBinding(v any) Option {
 	}
 }
 
+// WithJSONSchema adds a JSON Schema for validation.
+func WithJSONSchema(schema []byte) Option {
+	return func(c *Conflex) error {
+		// Use a unique schema name to avoid caching issues
+		schemaName := fmt.Sprintf("inline_%d.json", rand.Int())
+		compiler := jsonschema.NewCompiler()
+
+		jsonSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
+		if err != nil {
+			return err
+		}
+
+		if err := compiler.AddResource(schemaName, jsonSchema); err != nil {
+			return err
+		}
+		s, err := compiler.Compile(schemaName)
+		if err != nil {
+			return err
+		}
+		c.jsonSchemaCompiled = s
+		return nil
+	}
+}
+
+// WithValidator adds a custom validation function.
+func WithValidator(fn func(map[string]any) error) Option {
+	return func(c *Conflex) error {
+		c.customValidators = append(c.customValidators, fn)
+		return nil
+	}
+}
+
 // New creates a new Conflex instance with the provided options.
 // It iterates through the options and applies each one to the Conflex instance.
 // If any of the options return an error, the errors are collected and returned.
@@ -161,6 +200,11 @@ func New(options ...Option) (*Conflex, error) {
 	}
 
 	return c, errs
+}
+
+// Validator is an interface for structs that can validate their own configuration.
+type Validator interface {
+	Validate() error
 }
 
 // Load loads configuration data from the registered sources and merges it into the internal values map.
@@ -182,9 +226,28 @@ func (c *Conflex) Load(ctx context.Context) error {
 		}
 	}
 
+	if c.jsonSchemaCompiled != nil {
+		fmt.Printf("[DEBUG] Type of config: %T, value: %#v\n", *c.values, *c.values)
+		if err := c.jsonSchemaCompiled.Validate(*c.values); err != nil {
+			return fmt.Errorf("JSON Schema validation failed: %w", err)
+		}
+	}
+
+	// Custom function validators
+	for _, fn := range c.customValidators {
+		if err := fn(*c.values); err != nil {
+			return err
+		}
+	}
+
 	if c.binding != nil {
 		if err := c.bind(); err != nil {
 			return err
+		}
+		if v, ok := c.binding.(Validator); ok {
+			if err := v.Validate(); err != nil {
+				return err
+			}
 		}
 	}
 
