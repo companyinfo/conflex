@@ -71,7 +71,7 @@ type mockKV struct {
 	meta *api.QueryMeta
 }
 
-func (m *mockKV) Get(key string, q *api.QueryOptions) (*api.KVPair, *api.QueryMeta, error) {
+func (m *mockKV) Get(_ string, _ *api.QueryOptions) (*api.KVPair, *api.QueryMeta, error) {
 	return m.pair, m.meta, nil
 }
 
@@ -82,7 +82,7 @@ type mockDecoder struct {
 	err       error
 }
 
-func (m *mockDecoder) Decode(data []byte, v any) error {
+func (m *mockDecoder) Decode(_ []byte, v any) error {
 	if m.err != nil {
 		return m.err
 	}

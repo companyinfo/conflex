@@ -93,7 +93,7 @@ type mockDecoderFile struct {
 	err       bool
 }
 
-func (m *mockDecoderFile) Decode(data []byte, v any) error {
+func (m *mockDecoderFile) Decode(_ []byte, v any) error {
 	if m.err {
 		return os.ErrInvalid
 	}
