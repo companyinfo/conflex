@@ -211,8 +211,7 @@ type Validator interface {
 // The method acquires a write lock on the values map before loading the configuration data, and releases the lock before returning.
 // If any of the sources fail to load the configuration data, the method returns the first encountered error.
 func (c *Conflex) Load(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	newValues := make(map[string]any)
 
 	for _, l := range c.sources {
 		conf, err := l.Load(ctx)
@@ -220,36 +219,55 @@ func (c *Conflex) Load(ctx context.Context) error {
 			return err
 		}
 
-		err = mergo.Merge(c.values, conf, mergo.WithOverride)
+		err = mergo.Merge(&newValues, conf, mergo.WithOverride)
 		if err != nil {
 			return err
 		}
 	}
 
 	if c.jsonSchemaCompiled != nil {
-		fmt.Printf("[DEBUG] Type of config: %T, value: %#v\n", *c.values, *c.values)
-		if err := c.jsonSchemaCompiled.Validate(*c.values); err != nil {
+		fmt.Printf("[DEBUG] Type of config: %T, value: %#v\n", newValues, newValues)
+		if err := c.jsonSchemaCompiled.Validate(newValues); err != nil {
 			return fmt.Errorf("JSON Schema validation failed: %w", err)
 		}
 	}
 
 	// Custom function validators
 	for _, fn := range c.customValidators {
-		if err := fn(*c.values); err != nil {
-			return err
+		var validatorErr error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					validatorErr = fmt.Errorf("validator panic: %v", r)
+				}
+			}()
+			validatorErr = fn(newValues)
+		}()
+		if validatorErr != nil {
+			return validatorErr
 		}
 	}
 
 	if c.binding != nil {
+		// Temporarily set c.values to newValues for binding
+		oldValues := c.values
+		c.values = &newValues
 		if err := c.bind(); err != nil {
+			c.values = oldValues
 			return err
 		}
 		if v, ok := c.binding.(Validator); ok {
 			if err := v.Validate(); err != nil {
+				c.values = oldValues
 				return err
 			}
 		}
+		c.values = oldValues
 	}
+
+	c.mu.Lock()
+	c.values = &newValues
+	c.mu.Unlock()
 
 	return nil
 }
@@ -266,7 +284,7 @@ func (c *Conflex) Dump(ctx context.Context) error {
 }
 
 func (c *Conflex) bind() error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "conflex", Result: c.binding})
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "conflex", Result: c.binding, Squash: true})
 	if err != nil {
 		return fmt.Errorf("failed to create decoder: %w", err)
 	}
@@ -292,29 +310,27 @@ func (c *Conflex) Values() *map[string]any {
 // The path is a dot-separated string that represents the nested structure of the map.
 // If the path is valid and the final value is found, it is returned. Otherwise, nil is returned.
 func (c *Conflex) getValueFromMap(path string) any {
-	segments := strings.Split(path, ".")
 	current := c.Values()
-
+	// 1. Check for direct key match first
+	if val, ok := (*current)[path]; ok {
+		return val
+	}
+	// 2. Fallback to dot notation traversal
+	segments := strings.Split(path, ".")
 	for i, segment := range segments {
 		if currentMap, ok := (*current)[segment]; ok {
-			// If it's the last segment, return the value
 			if i == len(segments)-1 {
 				return currentMap
 			}
-
-			// If it's a nested map, continue traversal
 			if nestedMap, ok := currentMap.(map[string]any); ok {
 				current = &nestedMap
 			} else {
-				// The path is invalid if a segment is not a map
 				return nil
 			}
 		} else {
-			// Key does not exist
 			return nil
 		}
 	}
-
 	return nil
 }
 
@@ -333,7 +349,11 @@ func (c *Conflex) GetString(key string) string {
 // GetStringE returns the value associated with the given key as a string.
 // If the value is not found or cannot be converted to a string, it returns an error.
 func (c *Conflex) GetStringE(key string) (string, error) {
-	return cast.ToStringE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return "", fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToStringE(val)
 }
 
 // GetBool returns the value associated with the given key as a boolean.
@@ -345,7 +365,11 @@ func (c *Conflex) GetBool(key string) bool {
 // GetBoolE returns the value associated with the given key as a boolean.
 // If the value is not found or cannot be converted to a boolean, it returns an error.
 func (c *Conflex) GetBoolE(key string) (bool, error) {
-	return cast.ToBoolE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return false, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToBoolE(val)
 }
 
 // GetInt returns the value associated with the given key as an integer.
@@ -357,7 +381,11 @@ func (c *Conflex) GetInt(key string) int {
 // GetIntE returns the value associated with the given key as an integer.
 // If the value is not found or cannot be converted to an integer, it returns an error.
 func (c *Conflex) GetIntE(key string) (int, error) {
-	return cast.ToIntE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToIntE(val)
 }
 
 // GetInt32 returns the value associated with the given key as an int32.
@@ -369,7 +397,11 @@ func (c *Conflex) GetInt32(key string) int32 {
 // GetInt32E returns the value associated with the given key as an int32.
 // If the value is not found or cannot be converted to an int32, it returns an error.
 func (c *Conflex) GetInt32E(key string) (int32, error) {
-	return cast.ToInt32E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToInt32E(val)
 }
 
 // GetInt64 returns the value associated with the given key as an int64.
@@ -381,7 +413,11 @@ func (c *Conflex) GetInt64(key string) int64 {
 // GetInt64E returns the value associated with the given key as an int64.
 // If the value is not found or cannot be converted to an int64, it returns an error.
 func (c *Conflex) GetInt64E(key string) (int64, error) {
-	return cast.ToInt64E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToInt64E(val)
 }
 
 // GetUint8 returns the value associated with the given key as an uint8.
@@ -393,7 +429,11 @@ func (c *Conflex) GetUint8(key string) uint8 {
 // GetUint8E returns the value associated with the given key as an uint8.
 // If the value is not found or cannot be converted to an uint8, it returns an error.
 func (c *Conflex) GetUint8E(key string) (uint8, error) {
-	return cast.ToUint8E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToUint8E(val)
 }
 
 // GetUint returns the value associated with the given key as an uint.
@@ -405,7 +445,11 @@ func (c *Conflex) GetUint(key string) uint {
 // GetUintE returns the value associated with the given key as an uint.
 // If the value is not found or cannot be converted to an uint, it returns an error.
 func (c *Conflex) GetUintE(key string) (uint, error) {
-	return cast.ToUintE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToUintE(val)
 }
 
 // GetUint16 returns the value associated with the given key as an uint16.
@@ -417,7 +461,11 @@ func (c *Conflex) GetUint16(key string) uint16 {
 // GetUint16E returns the value associated with the given key as an uint16.
 // If the value is not found or cannot be converted to an uint16, it returns an error.
 func (c *Conflex) GetUint16E(key string) (uint16, error) {
-	return cast.ToUint16E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToUint16E(val)
 }
 
 // GetUint32 returns the value associated with the given key as an uint32.
@@ -429,7 +477,11 @@ func (c *Conflex) GetUint32(key string) uint32 {
 // GetUint32E returns the value associated with the given key as an uint32.
 // If the value is not found or cannot be converted to an uint32, it returns an error.
 func (c *Conflex) GetUint32E(key string) (uint32, error) {
-	return cast.ToUint32E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToUint32E(val)
 }
 
 // GetUint64 returns the value associated with the given key as an uint64.
@@ -441,7 +493,11 @@ func (c *Conflex) GetUint64(key string) uint64 {
 // GetUint64E returns the value associated with the given key as an uint64.
 // If the value is not found or cannot be converted to an uint64, it returns an error.
 func (c *Conflex) GetUint64E(key string) (uint64, error) {
-	return cast.ToUint64E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToUint64E(val)
 }
 
 // GetFloat64 returns the value associated with the given key as a float64.
@@ -453,7 +509,11 @@ func (c *Conflex) GetFloat64(key string) float64 {
 // GetFloat64E returns the value associated with the given key as a float64.
 // If the value is not found or cannot be converted to a float64, it returns an error.
 func (c *Conflex) GetFloat64E(key string) (float64, error) {
-	return cast.ToFloat64E(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToFloat64E(val)
 }
 
 // GetTime returns the value associated with the given key as a time.Time.
@@ -465,7 +525,11 @@ func (c *Conflex) GetTime(key string) time.Time {
 // GetTimeE returns the value associated with the given key as a time.Time.
 // If the value is not found or cannot be converted to a time.Time, it returns an error.
 func (c *Conflex) GetTimeE(key string) (time.Time, error) {
-	return cast.ToTimeE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return time.Time{}, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToTimeE(val)
 }
 
 // GetDuration returns the value associated with the given key as a time.Duration.
@@ -477,7 +541,11 @@ func (c *Conflex) GetDuration(key string) time.Duration {
 // GetDurationE returns the value associated with the given key as a time.Duration.
 // If the value is not found or cannot be converted to a time.Duration, it returns an error.
 func (c *Conflex) GetDurationE(key string) (time.Duration, error) {
-	return cast.ToDurationE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return 0, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToDurationE(val)
 }
 
 // GetIntSlice returns the value associated with the given key as a slice of integers.
@@ -489,7 +557,11 @@ func (c *Conflex) GetIntSlice(key string) []int {
 // GetIntSliceE returns the value associated with the given key as a slice of integers.
 // If the value is not found or cannot be converted to a slice of integers, it returns an error.
 func (c *Conflex) GetIntSliceE(key string) ([]int, error) {
-	return cast.ToIntSliceE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToIntSliceE(val)
 }
 
 // GetStringSlice returns the value associated with the given key as a slice of strings.
@@ -501,7 +573,11 @@ func (c *Conflex) GetStringSlice(key string) []string {
 // GetStringSliceE returns the value associated with the given key as a slice of strings.
 // If the value is not found or cannot be converted to a slice of strings, it returns an error.
 func (c *Conflex) GetStringSliceE(key string) ([]string, error) {
-	return cast.ToStringSliceE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToStringSliceE(val)
 }
 
 // GetStringMap returns the value associated with the given key as a map[string]any.
@@ -513,7 +589,11 @@ func (c *Conflex) GetStringMap(key string) map[string]any {
 // GetStringMapE returns the value associated with the given key as a map[string]any.
 // If the value is not found or cannot be converted to a map[string]any, it returns an error.
 func (c *Conflex) GetStringMapE(key string) (map[string]any, error) {
-	return cast.ToStringMapE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToStringMapE(val)
 }
 
 // GetStringMapString returns the value associated with the given key as a map[string]string.
@@ -525,7 +605,11 @@ func (c *Conflex) GetStringMapString(key string) map[string]string {
 // GetStringMapStringE returns the value associated with the given key as a map[string]string.
 // If the value is not found or cannot be converted to a map[string]string, it returns an error.
 func (c *Conflex) GetStringMapStringE(key string) (map[string]string, error) {
-	return cast.ToStringMapStringE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToStringMapStringE(val)
 }
 
 // GetStringMapStringSlice returns the value associated with the given key as a map[string][]string.
@@ -537,5 +621,9 @@ func (c *Conflex) GetStringMapStringSlice(key string) map[string][]string {
 // GetStringMapStringSliceE returns the value associated with the given key as a map[string][]string.
 // If the value is not found or cannot be converted to a map[string][]string, it returns an error.
 func (c *Conflex) GetStringMapStringSliceE(key string) (map[string][]string, error) {
-	return cast.ToStringMapStringSliceE(c.Get(key))
+	val := c.Get(key)
+	if val == nil {
+		return nil, fmt.Errorf("key %q not found", key)
+	}
+	return cast.ToStringMapStringSliceE(val)
 }

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 )
@@ -334,4 +335,434 @@ func (s *ConflexTestSuite) TestCustomValidator_Succeeds() {
 	}))
 	s.NoError(err)
 	s.NoError(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestBinding_ExtraFields() {
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42, "extra": 99}}
+	var bind bindStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(42, bind.Bar)
+}
+
+func (s *ConflexTestSuite) TestBinding_MissingFields() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	var bind bindStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(0, bind.Bar)
+}
+
+func (s *ConflexTestSuite) TestBinding_TypeMismatch() {
+	src := &mockSource{conf: map[string]any{"foo": 123, "bar": "notanint"}}
+	var bind bindStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.Error(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestMultipleDumpers_AllCalled() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	d1 := &mockDumper{}
+	d2 := &mockDumper{}
+	c, err := New(WithSource(src), WithDumper(d1), WithDumper(d2))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.NoError(c.Dump(context.Background()))
+	s.True(d1.called)
+	s.True(d2.called)
+}
+
+func (s *ConflexTestSuite) TestConcurrentGetSetLoad() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	wg := make(chan struct{})
+	for range [10]int{} {
+		go func() {
+			_ = c.Get("foo")
+			_ = c.Load(context.Background())
+			wg <- struct{}{}
+		}()
+	}
+	for range [10]int{} {
+		<-wg
+	}
+}
+
+func (s *ConflexTestSuite) TestNilAndEmptyConfigMap() {
+	srcNil := &mockSource{conf: nil}
+	c, err := New(WithSource(srcNil))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	srcEmpty := &mockSource{conf: map[string]any{}}
+	c2, err := New(WithSource(srcEmpty))
+	s.NoError(err)
+	s.NoError(c2.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestGet_DeeplyNestedDotNotation() {
+	src := &mockSource{conf: map[string]any{
+		"a": map[string]any{"b": map[string]any{"c": map[string]any{"d": 1}}},
+	}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	v := c.Get("a.b.c.d")
+	s.Equal(1, v)
+}
+
+type pointerFieldsStruct struct {
+	Foo *string `conflex:"foo"`
+	Bar *int    `conflex:"bar"`
+}
+
+func (s *ConflexTestSuite) TestBinding_PointerFields() {
+	foo := "bar"
+	bar := 42
+	src := &mockSource{conf: map[string]any{"foo": foo, "bar": bar}}
+	var bind pointerFieldsStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.NotNil(bind.Foo)
+	s.NotNil(bind.Bar)
+	s.Equal(foo, *bind.Foo)
+	s.Equal(bar, *bind.Bar)
+}
+
+type embeddedStruct struct {
+	bindStruct
+	Baz string `conflex:"baz"`
+}
+
+func (s *ConflexTestSuite) TestBinding_EmbeddedStruct() {
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42, "baz": "qux"}}
+	var bind embeddedStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(42, bind.Bar)
+	s.Equal("qux", bind.Baz)
+}
+
+func (s *ConflexTestSuite) TestValidator_Panic() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src), WithValidator(func(cfg map[string]any) error {
+		panic("validator panic")
+	}))
+	s.NoError(err)
+	s.Error(c.Load(context.Background()))
+}
+
+func (s *ConflexTestSuite) TestReloadAfterChange() {
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", c.GetString("foo"))
+	src.conf["foo"] = "baz"
+	s.NoError(c.Load(context.Background()))
+	s.Equal("baz", c.GetString("foo"))
+}
+
+func (s *ConflexTestSuite) TestGetterMethods() {
+	timeStr := "2023-01-01T12:00:00Z"
+	durStr := "1h2m3s"
+	conf := map[string]any{
+		"str":         "foo",
+		"bool":        true,
+		"boolstr":     "true",
+		"int":         42,
+		"intstr":      "42",
+		"int32":       int32(32),
+		"int64":       int64(64),
+		"uint8":       uint8(8),
+		"uint":        uint(7),
+		"uint16":      uint16(16),
+		"uint32":      uint32(32),
+		"uint64":      uint64(64),
+		"float64":     3.14,
+		"floatstr":    "2.71",
+		"time":        timeStr,
+		"duration":    durStr,
+		"intslice":    []any{1, 2, 3},
+		"strslice":    []any{"a", "b"},
+		"map":         map[string]any{"a": 1},
+		"mapstr":      map[string]any{"a": "x"},
+		"mapstrslice": map[string]any{"a": []any{"x", "y"}},
+	}
+	c, err := New(WithSource(&mockSource{conf: conf}))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	// GetString, GetStringE
+	s.Equal("foo", c.GetString("str"))
+	v, err := c.GetStringE("str")
+	s.NoError(err)
+	s.Equal("foo", v)
+	_, err = c.GetStringE("notfound")
+	s.Error(err)
+
+	// GetBool, GetBoolE
+	s.True(c.GetBool("bool"))
+	b, err := c.GetBoolE("boolstr")
+	s.NoError(err)
+	s.True(b)
+	_, err = c.GetBoolE("notfound")
+	s.Error(err)
+
+	// GetInt, GetIntE
+	s.Equal(42, c.GetInt("int"))
+	i, err := c.GetIntE("intstr")
+	s.NoError(err)
+	s.Equal(42, i)
+	_, err = c.GetIntE("notfound")
+	s.Error(err)
+
+	// GetInt32, GetInt32E
+	s.Equal(int32(32), c.GetInt32("int32"))
+	i32, err := c.GetInt32E("int32")
+	s.NoError(err)
+	s.Equal(int32(32), i32)
+	_, err = c.GetInt32E("notfound")
+	s.Error(err)
+
+	// GetInt64, GetInt64E
+	s.Equal(int64(64), c.GetInt64("int64"))
+	i64, err := c.GetInt64E("int64")
+	s.NoError(err)
+	s.Equal(int64(64), i64)
+	_, err = c.GetInt64E("notfound")
+	s.Error(err)
+
+	// GetUint8, GetUint8E
+	s.Equal(uint8(8), c.GetUint8("uint8"))
+	u8, err := c.GetUint8E("uint8")
+	s.NoError(err)
+	s.Equal(uint8(8), u8)
+	_, err = c.GetUint8E("notfound")
+	s.Error(err)
+
+	// GetUint, GetUintE
+	s.Equal(uint(7), c.GetUint("uint"))
+	u, err := c.GetUintE("uint")
+	s.NoError(err)
+	s.Equal(uint(7), u)
+	_, err = c.GetUintE("notfound")
+	s.Error(err)
+
+	// GetUint16, GetUint16E
+	s.Equal(uint16(16), c.GetUint16("uint16"))
+	u16, err := c.GetUint16E("uint16")
+	s.NoError(err)
+	s.Equal(uint16(16), u16)
+	_, err = c.GetUint16E("notfound")
+	s.Error(err)
+
+	// GetUint32, GetUint32E
+	s.Equal(uint32(32), c.GetUint32("uint32"))
+	u32, err := c.GetUint32E("uint32")
+	s.NoError(err)
+	s.Equal(uint32(32), u32)
+	_, err = c.GetUint32E("notfound")
+	s.Error(err)
+
+	// GetUint64, GetUint64E
+	s.Equal(uint64(64), c.GetUint64("uint64"))
+	u64, err := c.GetUint64E("uint64")
+	s.NoError(err)
+	s.Equal(uint64(64), u64)
+	_, err = c.GetUint64E("notfound")
+	s.Error(err)
+
+	// GetFloat64, GetFloat64E
+	s.InDelta(3.14, c.GetFloat64("float64"), 0.0001)
+	f64, err := c.GetFloat64E("floatstr")
+	s.NoError(err)
+	s.InDelta(2.71, f64, 0.0001)
+	_, err = c.GetFloat64E("notfound")
+	s.Error(err)
+
+	// GetTime, GetTimeE
+	t, err := c.GetTimeE("time")
+	s.NoError(err)
+	s.Equal(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC), t)
+	s.Equal(time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC), c.GetTime("time"))
+	_, err = c.GetTimeE("notfound")
+	s.Error(err)
+
+	// GetDuration, GetDurationE
+	d, err := c.GetDurationE("duration")
+	s.NoError(err)
+	s.Equal(1*time.Hour+2*time.Minute+3*time.Second, d)
+	s.Equal(1*time.Hour+2*time.Minute+3*time.Second, c.GetDuration("duration"))
+	_, err = c.GetDurationE("notfound")
+	s.Error(err)
+
+	// GetIntSlice, GetIntSliceE
+	s.Equal([]int{1, 2, 3}, c.GetIntSlice("intslice"))
+	is, err := c.GetIntSliceE("intslice")
+	s.NoError(err)
+	s.Equal([]int{1, 2, 3}, is)
+	_, err = c.GetIntSliceE("notfound")
+	s.Error(err)
+
+	// GetStringSlice, GetStringSliceE
+	s.Equal([]string{"a", "b"}, c.GetStringSlice("strslice"))
+	ss, err := c.GetStringSliceE("strslice")
+	s.NoError(err)
+	s.Equal([]string{"a", "b"}, ss)
+	_, err = c.GetStringSliceE("notfound")
+	s.Error(err)
+
+	// GetStringMap, GetStringMapE
+	s.Equal(map[string]any{"a": 1}, c.GetStringMap("map"))
+	m, err := c.GetStringMapE("map")
+	s.NoError(err)
+	s.Equal(map[string]any{"a": 1}, m)
+	_, err = c.GetStringMapE("notfound")
+	s.Error(err)
+
+	// GetStringMapString, GetStringMapStringE
+	s.Equal(map[string]string{"a": "x"}, c.GetStringMapString("mapstr"))
+	ms, err := c.GetStringMapStringE("mapstr")
+	s.NoError(err)
+	s.Equal(map[string]string{"a": "x"}, ms)
+	_, err = c.GetStringMapStringE("notfound")
+	s.Error(err)
+
+	// GetStringMapStringSlice, GetStringMapStringSliceE
+	s.Equal(map[string][]string{"a": {"x", "y"}}, c.GetStringMapStringSlice("mapstrslice"))
+	mss, err := c.GetStringMapStringSliceE("mapstrslice")
+	s.NoError(err)
+	s.Equal(map[string][]string{"a": {"x", "y"}}, mss)
+	_, err = c.GetStringMapStringSliceE("notfound")
+	s.Error(err)
+}
+
+func (s *ConflexTestSuite) TestBinding_UnexportedFields() {
+	type hiddenStruct struct {
+		Foo string `conflex:"foo"`
+		bar int    `conflex:"bar"` // unexported
+	}
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42}}
+	var bind hiddenStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(0, bind.bar) // unexported field should not be set
+}
+
+func (s *ConflexTestSuite) TestBinding_MissingTags() {
+	type noTagStruct struct {
+		Foo string
+		Bar int
+	}
+	src := &mockSource{conf: map[string]any{"Foo": "bar", "Bar": 42}}
+	var bind noTagStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(42, bind.Bar)
+}
+
+func (s *ConflexTestSuite) TestBinding_DefaultValues() {
+	type defStruct struct {
+		Foo string `conflex:"foo"`
+		Bar int    `conflex:"bar"`
+		Baz string `conflex:"baz"`
+	}
+	var bind defStruct
+	bind.Baz = "default"
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42}}
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.Equal("bar", bind.Foo)
+	s.Equal(42, bind.Bar)
+	s.Equal("default", bind.Baz) // not overwritten
+}
+
+func (s *ConflexTestSuite) TestWithBinding_NilAndEmpty() {
+	c, err := New(WithBinding(nil))
+	s.NoError(err)
+	s.NotNil(c)
+
+	// Empty struct pointer
+	type emptyStruct struct{}
+	var bind *emptyStruct
+	c2, err := New(WithBinding(bind))
+	s.NoError(err)
+	s.NotNil(c2)
+}
+
+func (s *ConflexTestSuite) TestGet_DotNotationWithKeyContainingDot() {
+	src := &mockSource{conf: map[string]any{"a": map[string]any{"b": 2}}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	// Should return nested value if direct key does not exist
+	v := c.Get("a.b")
+	s.Equal(2, v)
+	// Direct key with dot
+	m := c.Values()
+	(*m)["a.b"] = 3
+	v2 := c.Get("a.b")
+	s.Equal(3, v2)
+}
+
+func (s *ConflexTestSuite) TestWithFileDumper() {
+	// Use a mock encoder and a temp file path
+	path := "/tmp/conflex_test_file_dumper.json"
+	c, err := New(WithFileDumper(path, "json"))
+	s.NoError(err)
+	s.NotNil(c)
+	// Should add a dumper (not testing file output here)
+	s.Len(c.dumpers, 1)
+}
+
+func (s *ConflexTestSuite) TestWithFileSource() {
+	// Use a mock decoder and a temp file path
+	path := "/tmp/conflex_test_file_source.json"
+	c, err := New(WithFileSource(path, "json"))
+	s.NoError(err)
+	s.NotNil(c)
+	// Should add a source
+	s.Len(c.sources, 1)
+}
+
+func (s *ConflexTestSuite) TestWithContentSource() {
+	data := []byte(`{"foo": "bar"}`)
+	c, err := New(WithContentSource(data, "json"))
+	s.NoError(err)
+	s.NotNil(c)
+	s.Len(c.sources, 1)
+}
+
+func (s *ConflexTestSuite) TestWithOSEnvVarSource() {
+	c, err := New(WithOSEnvVarSource("TESTPREFIX_"))
+	s.NoError(err)
+	s.NotNil(c)
+	s.Len(c.sources, 1)
+}
+
+func (s *ConflexTestSuite) TestWithConsulSource() {
+	// This will fail if Consul is not available, so just test error on invalid codec
+	c, err := New(WithConsulSource("some/path", "notacodec"))
+	s.Error(err)
+	s.NotNil(c)
+	s.Len(c.sources, 0)
+	// Test with valid codec (will still fail if Consul is not running, but should not panic)
+	c2, err := New(WithConsulSource("some/path", "json"))
+	s.NotNil(c2)
 }
