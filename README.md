@@ -1,6 +1,6 @@
 # Conflex
 
-[![Conflex CI](https://github.com/companyinfo/conflex/actions/workflows/ci.yaml/badge.svg)](https://github.com/companyinfo/conflex/actions/workflows/ci.yaml) ![Codecov](https://img.shields.io/codecov/c/github/companyinfo/conflex)
+[![Conflex CI](https://github.com/companyinfo/conflex/actions/workflows/ci.yaml/badge.svg)](https://github.com/companyinfo/conflex/actions/workflows/ci.yaml) [![codecov](https://codecov.io/gh/companyinfo/conflex/graph/badge.svg?token=JwgTSjIfXS)](https://codecov.io/gh/companyinfo/conflex)
  [![Go Report Card](https://goreportcard.com/badge/go.companyinfo.dev/conflex)](https://goreportcard.com/report/go.companyinfo.dev/conflex) [![Go Reference](https://pkg.go.dev/badge/go.companyinfo.dev/conflex.svg)](https://pkg.go.dev/go.companyinfo.dev/conflex)
 
 Conflex (pronounced /ˈkɒnflɛks/) is a powerful and versatile configuration management package for Go that simplifies
