@@ -57,7 +57,7 @@ jobs:
         cache-dependency-path: go.sum
 
     - name: Test Conflex
-      run: go test -v -coverprofile=coverage.txt ./...
+      run: go test -race -v -coverprofile=coverage.txt ./...
 
     - name: Upload results to Codecov
       uses: codecov/codecov-action@v5
