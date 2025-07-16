@@ -13,7 +13,7 @@ require (
 	github.com/spf13/cast v1.9.2
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.38.0
-	github.com/testcontainers/testcontainers-go/modules/consul v0.37.0
+	github.com/testcontainers/testcontainers-go/modules/consul v0.38.0
 )
 
 replace github.com/armon/go-metrics v0.5.3 => github.com/hashicorp/go-metrics v0.5.3
