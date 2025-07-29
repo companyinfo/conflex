@@ -284,7 +284,19 @@ func (c *Conflex) Dump(ctx context.Context) error {
 }
 
 func (c *Conflex) bind() error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "conflex", Result: c.binding, Squash: true})
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		TagName:          "conflex",
+		Result:           c.binding,
+		Squash:           true,
+		WeaklyTypedInput: true,
+		Metadata:         nil,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+			mapstructure.StringToSliceHookFunc(","),
+			mapstructure.StringToTimeHookFunc(time.RFC3339),
+			mapstructure.StringToURLHookFunc(),
+		),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create decoder: %w", err)
 	}
