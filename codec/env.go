@@ -42,15 +42,35 @@ func (EnvVarCodec) Decode(data []byte, v any) error {
 		if len(pair) != 2 {
 			continue
 		}
-		key := pair[0]
-		parts := strings.Split(strings.ToLower(key), "_")
+
+		// Sanitize key - trim whitespace
+		key := strings.TrimSpace(pair[0])
+		if key == "" {
+			continue
+		}
+
+		// Split key by underscores and filter out empty parts
+		rawParts := strings.Split(strings.ToLower(key), "_")
+		parts := make([]string, 0, len(rawParts))
+		for _, part := range rawParts {
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+
+		// Skip if no valid parts remain
+		if len(parts) == 0 {
+			continue
+		}
 
 		current := conf
+		// Create nested structure for all parts except the last one
 		for i := 0; i < len(parts)-1; i++ {
 			part := parts[i]
 			if _, exists := current[part]; !exists {
 				current[part] = make(map[string]any)
 			}
+			// Handle type conflicts: if current[part] is not a map, overwrite it
 			if nextMap, ok := current[part].(map[string]any); ok {
 				current = nextMap
 			} else {
@@ -59,7 +79,8 @@ func (EnvVarCodec) Decode(data []byte, v any) error {
 			}
 		}
 
-		current[parts[len(parts)-1]] = pair[1]
+		// Set the final value, trimming whitespace from value as well
+		current[parts[len(parts)-1]] = strings.TrimSpace(pair[1])
 	}
 
 	ptr, ok := v.(*map[string]any)
