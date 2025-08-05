@@ -226,7 +226,6 @@ func (c *Conflex) Load(ctx context.Context) error {
 	}
 
 	if c.jsonSchemaCompiled != nil {
-		fmt.Printf("[DEBUG] Type of config: %T, value: %#v\n", newValues, newValues)
 		if err := c.jsonSchemaCompiled.Validate(newValues); err != nil {
 			return fmt.Errorf("JSON Schema validation failed: %w", err)
 		}
@@ -262,7 +261,7 @@ func (c *Conflex) Load(ctx context.Context) error {
 				return err
 			}
 		}
-		c.values = oldValues
+		// Don't restore oldValues on success - newValues will be set below
 	}
 
 	c.mu.Lock()
