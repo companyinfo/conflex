@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,9 @@ type Conflex struct {
 	jsonSchema         string
 	jsonSchemaCompiled *jsonschema.Schema
 	customValidators   []func(map[string]any) error
+	// Performance optimizations
+	decoderConfig *mapstructure.DecoderConfig
+	decoderOnce   sync.Once
 }
 
 // WithSource returns an Option that configures the Conflex instance to add a source for loading configuration data.
@@ -207,32 +211,87 @@ type Validator interface {
 	Validate() error
 }
 
-// Load loads configuration data from the registered sources and merges it into the internal values map.
-// The method acquires a write lock on the values map before loading the configuration data, and releases the lock before returning.
-// If any of the sources fail to load the configuration data, the method returns the first encountered error.
-func (c *Conflex) Load(ctx context.Context) error {
+// getDecoderConfig returns a cached decoder configuration to reduce reflection overhead.
+func (c *Conflex) getDecoderConfig() *mapstructure.DecoderConfig {
+	c.decoderOnce.Do(func() {
+		c.decoderConfig = &mapstructure.DecoderConfig{
+			TagName:          "conflex",
+			Squash:           true,
+			WeaklyTypedInput: true,
+			DecodeHook: mapstructure.ComposeDecodeHookFunc(
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+				mapstructure.StringToTimeHookFunc(time.RFC3339),
+				mapstructure.StringToURLHookFunc(),
+			),
+		}
+	})
+	return c.decoderConfig
+}
+
+// loadSourcesParallel loads configuration data from all sources in parallel for better performance.
+func (c *Conflex) loadSourcesParallel(ctx context.Context) (map[string]any, error) {
+	if len(c.sources) == 0 {
+		return make(map[string]any), nil
+	}
+
+	type result struct {
+		config map[string]any
+		index  int
+		err    error
+	}
+
+	results := make(chan result, len(c.sources))
+
+	// Load all sources in parallel
+	for i, source := range c.sources {
+		go func(idx int, src Source) {
+			conf, err := src.Load(ctx)
+			if err != nil {
+				err = NewConfigError(fmt.Sprintf("source[%d]", idx), "load", err)
+			}
+			results <- result{config: conf, index: idx, err: err}
+		}(i, source)
+	}
+
+	// Collect results
+	configs := make([]map[string]any, len(c.sources))
+	for range c.sources {
+		res := <-results
+		if res.err != nil {
+			return nil, res.err
+		}
+		configs[res.index] = res.config
+	}
+
+	// Merge in order to maintain precedence
 	newValues := make(map[string]any)
-
-	for _, l := range c.sources {
-		conf, err := l.Load(ctx)
-		if err != nil {
-			return err
+	for i, conf := range configs {
+		if err := mergo.Merge(&newValues, conf, mergo.WithOverride); err != nil {
+			return nil, NewConfigError(fmt.Sprintf("source[%d]", i), "merge", err)
 		}
+	}
 
-		err = mergo.Merge(&newValues, conf, mergo.WithOverride)
-		if err != nil {
-			return err
-		}
+	return newValues, nil
+}
+
+// Load loads configuration data from the registered sources and merges it into the internal values map.
+// The method validates the configuration data (including binding validation) before acquiring a write lock
+// to atomically update the values map. If any of the sources fail to load or validate, it returns an error.
+func (c *Conflex) Load(ctx context.Context) error {
+	newValues, err := c.loadSourcesParallel(ctx)
+	if err != nil {
+		return err
 	}
 
 	if c.jsonSchemaCompiled != nil {
 		if err := c.jsonSchemaCompiled.Validate(newValues); err != nil {
-			return fmt.Errorf("JSON Schema validation failed: %w", err)
+			return NewConfigError("json-schema", "validate", err)
 		}
 	}
 
 	// Custom function validators
-	for _, fn := range c.customValidators {
+	for i, fn := range c.customValidators {
 		var validatorErr error
 		func() {
 			defer func() {
@@ -243,30 +302,25 @@ func (c *Conflex) Load(ctx context.Context) error {
 			validatorErr = fn(newValues)
 		}()
 		if validatorErr != nil {
-			return validatorErr
+			return NewConfigError(fmt.Sprintf("custom-validator[%d]", i), "validate", validatorErr)
 		}
-	}
-
-	if c.binding != nil {
-		// Temporarily set c.values to newValues for binding
-		oldValues := c.values
-		c.values = &newValues
-		if err := c.bind(); err != nil {
-			c.values = oldValues
-			return err
-		}
-		if v, ok := c.binding.(Validator); ok {
-			if err := v.Validate(); err != nil {
-				c.values = oldValues
-				return err
-			}
-		}
-		// Don't restore oldValues on success - newValues will be set below
 	}
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.binding != nil {
+		// Validate binding without modifying shared state
+		if err := c.bindAndValidate(newValues); err != nil {
+			return NewConfigError("binding", "validate", err)
+		}
+		// Now safely update the actual binding struct
+		if err := c.bind(&newValues); err != nil {
+			return NewConfigError("binding", "bind", err)
+		}
+	}
+
 	c.values = &newValues
-	c.mu.Unlock()
 
 	return nil
 }
@@ -282,29 +336,53 @@ func (c *Conflex) Dump(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conflex) bind() error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		TagName:          "conflex",
-		Result:           c.binding,
-		Squash:           true,
-		WeaklyTypedInput: true,
-		Metadata:         nil,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
-			mapstructure.StringToTimeHookFunc(time.RFC3339),
-			mapstructure.StringToURLHookFunc(),
-		),
-	})
+func (c *Conflex) bind(values *map[string]any) error {
+	config := c.getDecoderConfig()
+	config.Result = c.binding
+
+	decoder, err := mapstructure.NewDecoder(config)
 	if err != nil {
 		return fmt.Errorf("failed to create decoder: %w", err)
 	}
 
-	if err := decoder.Decode(c.values); err != nil {
+	if err := decoder.Decode(values); err != nil {
 		return fmt.Errorf("failed to decode configuration: %w", err)
 	}
 
-	return err
+	return nil
+}
+
+// bindAndValidate performs binding and validation on the provided values without modifying shared state.
+// This method is used during Load to validate configuration before atomically updating c.values.
+func (c *Conflex) bindAndValidate(values map[string]any) error {
+	// Create a temporary copy of the binding struct to avoid race conditions
+	// when multiple goroutines call Load() concurrently
+	bindingType := reflect.TypeOf(c.binding)
+	if bindingType.Kind() == reflect.Ptr {
+		bindingType = bindingType.Elem()
+	}
+	tempBinding := reflect.New(bindingType).Interface()
+
+	config := c.getDecoderConfig()
+	config.Result = tempBinding
+
+	decoder, err := mapstructure.NewDecoder(config)
+	if err != nil {
+		return fmt.Errorf("failed to create decoder: %w", err)
+	}
+
+	if err := decoder.Decode(&values); err != nil {
+		return fmt.Errorf("failed to decode configuration: %w", err)
+	}
+
+	// Run validation if the binding implements Validator interface
+	if v, ok := tempBinding.(Validator); ok {
+		if err := v.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Values returns a pointer to the internal values map of the Conflex instance.

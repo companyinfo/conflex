@@ -17,6 +17,7 @@ package conflex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -199,13 +200,13 @@ func (s *ConflexTestSuite) TestConcurrentLoad() {
 	c, err := New(WithSource(src))
 	s.NoError(err)
 	wg := make(chan struct{})
-	for range [10]int{} {
+	for range 10 {
 		go func() {
 			_ = c.Load(context.Background())
 			wg <- struct{}{}
 		}()
 	}
-	for range [10]int{} {
+	for range 10 {
 		<-wg
 	}
 }
@@ -383,16 +384,73 @@ func (s *ConflexTestSuite) TestConcurrentGetSetLoad() {
 	s.NoError(err)
 	s.NoError(c.Load(context.Background()))
 	wg := make(chan struct{})
-	for range [10]int{} {
+	for range 10 {
 		go func() {
 			_ = c.Get("foo")
 			_ = c.Load(context.Background())
 			wg <- struct{}{}
 		}()
 	}
-	for range [10]int{} {
+	for range 10 {
 		<-wg
 	}
+}
+
+// validatingBindStruct implements Validator interface to test race conditions during binding validation
+type validatingBindStruct struct {
+	Foo string `conflex:"foo"`
+	Bar int    `conflex:"bar"`
+}
+
+func (v *validatingBindStruct) Validate() error {
+	if v.Foo == "" {
+		return errors.New("foo cannot be empty")
+	}
+	return nil
+}
+
+func (s *ConflexTestSuite) TestConcurrentLoadWithBindingValidation() {
+	// This test specifically targets the race condition that existed between
+	// binding validation and concurrent reads
+	src := &mockSource{conf: map[string]any{"foo": "bar", "bar": 42}}
+	var bind validatingBindStruct
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+
+	// Perform initial load
+	s.NoError(c.Load(context.Background()))
+
+	// Run concurrent operations that previously caused race conditions
+	wg := make(chan struct{})
+
+	for range 20 {
+		go func() {
+			defer func() { wg <- struct{}{} }()
+
+			// Mix of reads and loads to stress test the race condition fix
+			for i := 0; i < 10; i++ {
+				if i%2 == 0 {
+					// Read operations
+					_ = c.Get("foo")
+					_ = c.GetString("foo")
+					_ = c.GetInt("bar")
+					_ = c.Values()
+				} else {
+					// Load operation (includes binding validation)
+					_ = c.Load(context.Background())
+				}
+			}
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for range 20 {
+		<-wg
+	}
+
+	// Verify final state is consistent
+	s.Equal("bar", c.GetString("foo"))
+	s.Equal(42, c.GetInt("bar"))
 }
 
 func (s *ConflexTestSuite) TestNilAndEmptyConfigMap() {
@@ -455,7 +513,7 @@ func (s *ConflexTestSuite) TestBinding_EmbeddedStruct() {
 
 func (s *ConflexTestSuite) TestValidator_Panic() {
 	src := &mockSource{conf: map[string]any{"foo": "bar"}}
-	c, err := New(WithSource(src), WithValidator(func(cfg map[string]any) error {
+	c, err := New(WithSource(src), WithValidator(func(_ map[string]any) error {
 		panic("validator panic")
 	}))
 	s.NoError(err)
@@ -763,6 +821,130 @@ func (s *ConflexTestSuite) TestWithConsulSource() {
 	s.NotNil(c)
 	s.Len(c.sources, 0)
 	// Test with valid codec (will still fail if Consul is not running, but should not panic)
-	c2, err := New(WithConsulSource("some/path", "json"))
+	c2, _ := New(WithConsulSource("some/path", "json"))
 	s.NotNil(c2)
+}
+
+func (s *ConflexTestSuite) TestConfigError() {
+	// Test ConfigError formatting
+	baseErr := errors.New("base error")
+
+	// Error with field
+	err1 := &ConfigError{
+		Source:    "source1",
+		Field:     "field1",
+		Operation: "parse",
+		Err:       baseErr,
+	}
+	s.Equal("config error in source1.field1 during parse: base error", err1.Error())
+	s.Equal(baseErr, err1.Unwrap())
+
+	// Error without field
+	err2 := &ConfigError{
+		Source:    "source2",
+		Operation: "load",
+		Err:       baseErr,
+	}
+	s.Equal("config error in source2 during load: base error", err2.Error())
+	s.Equal(baseErr, err2.Unwrap())
+}
+
+func (s *ConflexTestSuite) TestParallelSourceLoading() {
+	// Test that sources are loaded and merged correctly
+	src1 := &mockSource{conf: map[string]any{"foo": "bar", "shared": "from1"}}
+	src2 := &mockSource{conf: map[string]any{"baz": "qux", "shared": "from2"}}
+	src3 := &mockSource{conf: map[string]any{"last": "value"}}
+
+	c, err := New(WithSource(src1), WithSource(src2), WithSource(src3))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	// Check all values are loaded
+	s.Equal("bar", c.GetString("foo"))
+	s.Equal("qux", c.GetString("baz"))
+	s.Equal("value", c.GetString("last"))
+	// Last source should override (src2 overrides src1)
+	s.Equal("from2", c.GetString("shared"))
+}
+
+func (s *ConflexTestSuite) TestParallelSourceError() {
+	// Test that errors in parallel loading are properly wrapped
+	src1 := &mockSource{conf: map[string]any{"foo": "bar"}}
+	src2 := &mockSource{err: errors.New("source failure")}
+
+	c, err := New(WithSource(src1), WithSource(src2))
+	s.NoError(err)
+
+	err = c.Load(context.Background())
+	s.Error(err)
+
+	// Check that error is properly wrapped
+	var configErr *ConfigError
+	s.True(errors.As(err, &configErr))
+	s.Contains(configErr.Source, "source[")
+	s.Equal("load", configErr.Operation)
+	s.Contains(configErr.Error(), "source failure")
+}
+
+func (s *ConflexTestSuite) TestDecoderConfigCaching() {
+	// Test that decoder config is cached for performance
+	// Create multiple binding operations to test decoder caching
+	// We can't directly test the cached decoder, but we can verify performance consistency
+	var bind1, bind2 bindStruct
+	src := &mockSource{conf: map[string]any{"foo": "test", "bar": 123}}
+
+	c1, err := New(WithSource(src), WithBinding(&bind1))
+	s.NoError(err)
+
+	c2, err := New(WithSource(src), WithBinding(&bind2))
+	s.NoError(err)
+
+	// Both should work without recreating decoder config each time
+	s.NoError(c1.Load(context.Background()))
+	s.NoError(c2.Load(context.Background()))
+
+	s.Equal("test", bind1.Foo)
+	s.Equal(123, bind1.Bar)
+	s.Equal("test", bind2.Foo)
+	s.Equal(123, bind2.Bar)
+}
+
+func BenchmarkParallelLoading(b *testing.B) {
+	// Create multiple slow sources to demonstrate parallel loading benefits
+	sources := make([]Source, 5)
+	for i := 0; i < 5; i++ {
+		sources[i] = &mockSlowSource{
+			conf:  map[string]any{fmt.Sprintf("key%d", i): fmt.Sprintf("value%d", i)},
+			delay: 10 * time.Millisecond, // Simulate I/O delay
+		}
+	}
+
+	var opts []Option
+	for _, src := range sources {
+		opts = append(opts, WithSource(src))
+	}
+
+	c, err := New(opts...)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := c.Load(context.Background())
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// mockSlowSource simulates a slow configuration source
+type mockSlowSource struct {
+	conf  map[string]any
+	delay time.Duration
+}
+
+func (m *mockSlowSource) Load(_ context.Context) (map[string]any, error) {
+	time.Sleep(m.delay)
+	return m.conf, nil
 }
