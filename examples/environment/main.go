@@ -16,33 +16,40 @@ type SimpleConfig struct {
 	Features FeaturesConfig `conflex:"features"`
 }
 
+// ServerConfig represents server configuration settings
 type ServerConfig struct {
 	Host string `conflex:"host"`
 	Port int    `conflex:"port"`
 }
 
+// DatabaseConfig represents database configuration settings
 type DatabaseConfig struct {
 	Primary PrimaryConfig `conflex:"primary"`
 }
 
+// PrimaryConfig represents primary database connection settings
 type PrimaryConfig struct {
 	Host     string `conflex:"host"`
 	Port     int    `conflex:"port"`
 	Database string `conflex:"database"`
 }
 
+// AuthConfig represents authentication configuration settings
 type AuthConfig struct {
 	JWT JWTConfig `conflex:"jwt"`
 }
 
+// JWTConfig represents JWT authentication settings
 type JWTConfig struct {
 	Secret string `conflex:"secret"`
 }
 
+// FeaturesConfig represents feature flags and settings
 type FeaturesConfig struct {
 	Debug DebugConfig `conflex:"debug"`
 }
 
+// DebugConfig represents debug mode settings
 type DebugConfig struct {
 	Mode bool `conflex:"mode"`
 }

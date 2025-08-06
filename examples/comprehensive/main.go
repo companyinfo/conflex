@@ -22,6 +22,7 @@ type WebAppConfig struct {
 	Features   FeaturesConfig   `conflex:"features"`
 }
 
+// ServerConfig represents server configuration settings
 type ServerConfig struct {
 	Host         string        `conflex:"host"`
 	Port         int           `conflex:"port"`
@@ -30,26 +31,31 @@ type ServerConfig struct {
 	TLS          TLSConfig     `conflex:"tls"`
 }
 
+// TLSConfig represents TLS/SSL configuration settings
 type TLSConfig struct {
 	Enabled bool       `conflex:"enabled"`
 	Cert    CertConfig `conflex:"cert"`
 	Key     KeyConfig  `conflex:"key"`
 }
 
+// CertConfig represents TLS certificate configuration
 type CertConfig struct {
 	File string `conflex:"file"`
 }
 
+// KeyConfig represents TLS private key configuration
 type KeyConfig struct {
 	File string `conflex:"file"`
 }
 
+// DatabaseConfig represents database configuration settings
 type DatabaseConfig struct {
 	Primary PrimaryConfig `conflex:"primary"`
 	Replica ReplicaConfig `conflex:"replica"`
 	Pool    PoolConfig    `conflex:"pool"`
 }
 
+// PrimaryConfig represents primary database connection settings
 type PrimaryConfig struct {
 	Host     string `conflex:"host"`
 	Port     int    `conflex:"port"`
@@ -59,6 +65,7 @@ type PrimaryConfig struct {
 	SSLMode  string `conflex:"ssl.mode"`
 }
 
+// ReplicaConfig represents replica database connection settings
 type ReplicaConfig struct {
 	Host     string `conflex:"host"`
 	Port     int    `conflex:"port"`
@@ -68,16 +75,19 @@ type ReplicaConfig struct {
 	SSLMode  string `conflex:"ssl.mode"`
 }
 
+// PoolConfig represents database connection pool settings
 type PoolConfig struct {
 	Max MaxConfig `conflex:"max"`
 }
 
+// MaxConfig represents maximum connection pool limits
 type MaxConfig struct {
 	Open     int           `conflex:"open"`
 	Idle     int           `conflex:"idle"`
 	Lifetime time.Duration `conflex:"lifetime"`
 }
 
+// RedisConfig represents Redis connection settings
 type RedisConfig struct {
 	Host     string        `conflex:"host"`
 	Port     int           `conflex:"port"`
@@ -86,50 +96,60 @@ type RedisConfig struct {
 	Timeout  time.Duration `conflex:"timeout"`
 }
 
+// AuthConfig represents authentication configuration settings
 type AuthConfig struct {
 	JWT     JWTConfig     `conflex:"jwt"`
 	Token   TokenConfig   `conflex:"token"`
 	Refresh RefreshConfig `conflex:"refresh"`
 }
 
+// JWTConfig represents JWT authentication settings
 type JWTConfig struct {
 	Secret string `conflex:"secret"`
 }
 
+// TokenConfig represents token configuration settings
 type TokenConfig struct {
 	Duration time.Duration `conflex:"duration"`
 }
 
+// RefreshConfig represents refresh token configuration settings
 type RefreshConfig struct {
 	Secret string `conflex:"secret"`
 }
 
+// LoggingConfig represents logging configuration settings
 type LoggingConfig struct {
 	Level      string `conflex:"level"`
 	Format     string `conflex:"format"`
 	OutputFile string `conflex:"output.file"`
 }
 
+// MonitoringConfig represents monitoring and metrics configuration
 type MonitoringConfig struct {
 	Enabled     bool   `conflex:"enabled"`
 	MetricsPort int    `conflex:"metrics.port"`
 	HealthPath  string `conflex:"health.path"`
 }
 
+// FeaturesConfig represents feature flags and settings
 type FeaturesConfig struct {
 	RateLimit RateLimitConfig `conflex:"rate.limit"`
 	Cache     CacheConfig     `conflex:"cache"`
 	Debug     DebugConfig     `conflex:"debug"`
 }
 
+// RateLimitConfig represents rate limiting configuration
 type RateLimitConfig struct {
 	Enabled bool `conflex:"enabled"`
 }
 
+// CacheConfig represents caching configuration
 type CacheConfig struct {
 	Enabled bool `conflex:"enabled"`
 }
 
+// DebugConfig represents debug mode settings
 type DebugConfig struct {
 	Mode bool `conflex:"mode"`
 }
