@@ -54,7 +54,7 @@ func (e *OSEnvVar) Load(_ context.Context) (map[string]any, error) {
 
 	var config map[string]any
 	if err := e.decoder.Decode([]byte(data), &config); err != nil {
-		return nil, fmt.Errorf("error decoding environment variables: %w", err)
+		return nil, fmt.Errorf("failed to decode environment variables: %w", err)
 	}
 
 	return config, nil

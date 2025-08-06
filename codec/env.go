@@ -26,11 +26,20 @@ const TypeEnvVar Type = "env_var"
 
 // init registers the EnvVarCodec with the codec package under the TypeEnvVar type.
 func init() {
+	RegisterEncoder(TypeEnvVar, EnvVarCodec{})
 	RegisterDecoder(TypeEnvVar, EnvVarCodec{})
 }
 
 // EnvVarCodec is a struct that implements the Codec interface for decoding environment variables.
 type EnvVarCodec struct{}
+
+// Encode encodes the provided value to environment variable format.
+// This method is provided for interface compatibility but environment variables are typically read-only.
+func (EnvVarCodec) Encode(v any) ([]byte, error) {
+	// Environment variables are typically read-only, so this is a no-op implementation
+	// that returns an empty byte slice to satisfy the Encoder interface
+	return []byte{}, nil
+}
 
 // Decode decodes the provided data bytes into a configuration map.
 // The data is expected to be in the format of environment variables, with each line containing a key-value pair separated by an equals sign.
@@ -75,7 +84,12 @@ func (EnvVarCodec) Decode(data []byte, v any) error {
 				current = nextMap
 			} else {
 				current[part] = make(map[string]any)
-				current = current[part].(map[string]any)
+				if nextMap, ok := current[part].(map[string]any); ok {
+					current = nextMap
+				} else {
+					// This should never happen, but handle it gracefully
+					return fmt.Errorf("failed to create nested map for key: %s", part)
+				}
 			}
 		}
 

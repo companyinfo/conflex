@@ -34,6 +34,7 @@ import (
 	"go.companyinfo.dev/conflex/codec"
 	"go.companyinfo.dev/conflex/dumper"
 	"go.companyinfo.dev/conflex/source"
+	"golang.org/x/exp/maps"
 )
 
 // Option is a functional option that can be used to configure a Conflex instance.
@@ -57,17 +58,23 @@ type Conflex struct {
 	decoderOnce   sync.Once
 }
 
-// WithSource returns an Option that configures the Conflex instance to add a source for loading configuration data.
+// WithSource adds a source to the configuration loader.
 func WithSource(loader Source) Option {
 	return func(c *Conflex) error {
+		if loader == nil {
+			return errors.New("source cannot be nil")
+		}
 		c.sources = append(c.sources, loader)
 		return nil
 	}
 }
 
-// WithDumper returns an Option that configures the Conflex instance to add a dumper for configuration data.
+// WithDumper adds a dumper to the configuration loader.
 func WithDumper(dumper Dumper) Option {
 	return func(c *Conflex) error {
+		if dumper == nil {
+			return errors.New("dumper cannot be nil")
+		}
 		c.dumpers = append(c.dumpers, dumper)
 		return nil
 	}
@@ -145,11 +152,16 @@ func WithConsulSource(path string, codecType codec.Type) Option {
 	}
 }
 
-// WithBinding returns an Option that configures the Conflex instance to bind the configuration data to a struct.
+// WithBinding returns an Option that configures the Conflex instance to bind configuration data to a struct.
 func WithBinding(v any) Option {
 	return func(c *Conflex) error {
+		if v == nil {
+			return errors.New("binding target cannot be nil")
+		}
+		if reflect.TypeOf(v).Kind() != reflect.Ptr {
+			return errors.New("binding target must be a pointer")
+		}
 		c.binding = v
-
 		return nil
 	}
 }
@@ -197,6 +209,9 @@ func New(options ...Option) (*Conflex, error) {
 	}
 
 	for _, option := range options {
+		if option == nil {
+			continue // Skip nil options
+		}
 		err := option(c)
 		if err != nil {
 			errs = errors.Join(errs, err)
@@ -242,31 +257,53 @@ func (c *Conflex) loadSourcesParallel(ctx context.Context) (map[string]any, erro
 	}
 
 	results := make(chan result, len(c.sources))
+	done := make(chan struct{})
+	defer close(done)
 
 	// Load all sources in parallel
 	for i, source := range c.sources {
 		go func(idx int, src Source) {
-			conf, err := src.Load(ctx)
-			if err != nil {
-				err = NewConfigError(fmt.Sprintf("source[%d]", idx), "load", err)
+			select {
+			case <-done:
+				return
+			default:
+				conf, err := src.Load(ctx)
+				if err != nil {
+					err = NewConfigError(fmt.Sprintf("source[%d]", idx), "load", err)
+				}
+				// Ensure we always send a valid map, even if source returns nil
+				if conf == nil {
+					conf = make(map[string]any)
+				}
+				select {
+				case results <- result{config: conf, index: idx, err: err}:
+				case <-done:
+					return
+				}
 			}
-			results <- result{config: conf, index: idx, err: err}
 		}(i, source)
 	}
 
 	// Collect results
 	configs := make([]map[string]any, len(c.sources))
 	for range c.sources {
-		res := <-results
-		if res.err != nil {
-			return nil, res.err
+		select {
+		case res := <-results:
+			if res.err != nil {
+				return nil, res.err
+			}
+			configs[res.index] = res.config
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		configs[res.index] = res.config
 	}
 
 	// Merge in order to maintain precedence
 	newValues := make(map[string]any)
 	for i, conf := range configs {
+		if conf == nil {
+			continue // Skip nil configurations
+		}
 		if err := mergo.Merge(&newValues, conf, mergo.WithOverride); err != nil {
 			return nil, NewConfigError(fmt.Sprintf("source[%d]", i), "merge", err)
 		}
@@ -279,9 +316,18 @@ func (c *Conflex) loadSourcesParallel(ctx context.Context) (map[string]any, erro
 // The method validates the configuration data (including binding validation) before acquiring a write lock
 // to atomically update the values map. If any of the sources fail to load or validate, it returns an error.
 func (c *Conflex) Load(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
+
 	newValues, err := c.loadSourcesParallel(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Ensure newValues is never nil
+	if newValues == nil {
+		newValues = make(map[string]any)
 	}
 
 	if c.jsonSchemaCompiled != nil {
@@ -292,6 +338,9 @@ func (c *Conflex) Load(ctx context.Context) error {
 
 	// Custom function validators
 	for i, fn := range c.customValidators {
+		if fn == nil {
+			continue // Skip nil validators
+		}
 		var validatorErr error
 		func() {
 			defer func() {
@@ -327,8 +376,20 @@ func (c *Conflex) Load(ctx context.Context) error {
 
 // Dump writes the current configuration values to the registered dumpers.
 func (c *Conflex) Dump(ctx context.Context) error {
+	// Get a copy of the values to avoid holding locks during dumper calls
+	var valuesCopy map[string]any
+	func() {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		if c.values != nil {
+			valuesCopy = maps.Clone(*c.values)
+		} else {
+			valuesCopy = make(map[string]any)
+		}
+	}()
+
 	for _, d := range c.dumpers {
-		if err := d.Dump(ctx, c.Values()); err != nil {
+		if err := d.Dump(ctx, &valuesCopy); err != nil {
 			return err
 		}
 	}
@@ -392,6 +453,11 @@ func (c *Conflex) Values() *map[string]any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	if c.values == nil {
+		emptyMap := make(map[string]any)
+		return &emptyMap
+	}
+
 	return c.values
 }
 
@@ -399,20 +465,30 @@ func (c *Conflex) Values() *map[string]any {
 // The path is a dot-separated string that represents the nested structure of the map.
 // If the path is valid and the final value is found, it is returned. Otherwise, nil is returned.
 func (c *Conflex) getValueFromMap(path string) any {
-	current := c.Values()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.values == nil {
+		return nil
+	}
+
+	// Work with a copy of the current map to avoid race conditions during traversal
+	current := *c.values
+
 	// 1. Check for direct key match first
-	if val, ok := (*current)[path]; ok {
+	if val, ok := current[path]; ok {
 		return val
 	}
+
 	// 2. Fallback to dot notation traversal
 	segments := strings.Split(path, ".")
 	for i, segment := range segments {
-		if currentMap, ok := (*current)[segment]; ok {
+		if currentMap, ok := current[segment]; ok {
 			if i == len(segments)-1 {
 				return currentMap
 			}
 			if nestedMap, ok := currentMap.(map[string]any); ok {
-				current = &nestedMap
+				current = nestedMap
 			} else {
 				return nil
 			}
@@ -426,6 +502,9 @@ func (c *Conflex) getValueFromMap(path string) any {
 // Get returns the value associated with the given key as an any type.
 // If the key is not found, it returns nil.
 func (c *Conflex) Get(key string) any {
+	if key == "" {
+		return nil
+	}
 	return c.getValueFromMap(key)
 }
 

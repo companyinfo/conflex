@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package conflex provides functionality for loading configuration data.
+// Package conflex provides a flexible configuration package.
 package conflex
 
 import "context"

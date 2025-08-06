@@ -34,7 +34,6 @@ type Consul struct {
 	client    *api.Client
 	kv        ConsulKV
 	path      string
-	onChange  func()
 	lastIndex uint64
 	decoder   codec.Decoder
 }
@@ -68,7 +67,10 @@ func (c *Consul) Load(ctx context.Context) (map[string]any, error) {
 		return make(map[string]any), nil
 	}
 
-	c.lastIndex = meta.LastIndex
+	// Only update lastIndex if meta is not nil
+	if meta != nil {
+		c.lastIndex = meta.LastIndex
+	}
 
 	var config map[string]any
 	caster, ok := c.decoder.(*codec.CasterCodec)

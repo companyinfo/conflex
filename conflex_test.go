@@ -165,9 +165,9 @@ func (s *ConflexTestSuite) TestDump_ErrorPropagates() {
 func (s *ConflexTestSuite) TestWithBinding_NonPointer() {
 	src := &mockSource{conf: map[string]any{"foo": "bar"}}
 	var bind bindStruct
-	c, err := New(WithSource(src), WithBinding(bind)) // not a pointer
-	s.NoError(err)
-	s.Error(c.Load(context.Background()))
+	_, err := New(WithSource(src), WithBinding(bind)) // not a pointer
+	s.Error(err)
+	s.Contains(err.Error(), "binding target must be a pointer")
 }
 
 func (s *ConflexTestSuite) TestLoad_NoSources() {
@@ -212,21 +212,21 @@ func (s *ConflexTestSuite) TestConcurrentLoad() {
 }
 
 func (s *ConflexTestSuite) TestWithSource_Nil() {
-	c, err := New(WithSource(nil))
-	s.NoError(err)
-	s.NotNil(c)
+	_, err := New(WithSource(nil))
+	s.Error(err)
+	s.Contains(err.Error(), "source cannot be nil")
 }
 
 func (s *ConflexTestSuite) TestWithDumper_Nil() {
-	c, err := New(WithDumper(nil))
-	s.NoError(err)
-	s.NotNil(c)
+	_, err := New(WithDumper(nil))
+	s.Error(err)
+	s.Contains(err.Error(), "dumper cannot be nil")
 }
 
 func (s *ConflexTestSuite) TestWithBinding_Nil() {
-	c, err := New(WithBinding(nil))
-	s.NoError(err)
-	s.NotNil(c)
+	_, err := New(WithBinding(nil))
+	s.Error(err)
+	s.Contains(err.Error(), "binding target cannot be nil")
 }
 
 func (s *ConflexTestSuite) TestNew_NoOptions() {
@@ -752,11 +752,11 @@ func (s *ConflexTestSuite) TestBinding_DefaultValues() {
 }
 
 func (s *ConflexTestSuite) TestWithBinding_NilAndEmpty() {
-	c, err := New(WithBinding(nil))
-	s.NoError(err)
-	s.NotNil(c)
+	_, err := New(WithBinding(nil))
+	s.Error(err)
+	s.Contains(err.Error(), "binding target cannot be nil")
 
-	// Empty struct pointer
+	// Empty struct pointer should be allowed
 	type emptyStruct struct{}
 	var bind *emptyStruct
 	c2, err := New(WithBinding(bind))

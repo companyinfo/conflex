@@ -11,10 +11,12 @@ handling application settings across different environments and formats.
 ---
 
 ## Table of Contents
+
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Advanced Usage](#advanced-usage)
+  - [Environment Variable Naming Conventions](#environment-variable-naming-conventions)
 - [Custom Codecs](#custom-codecs)
 - [Validation](#validation)
 - [Real-World Example](#real-world-example)
@@ -31,7 +33,8 @@ handling application settings across different environments and formats.
 
 - **Easy Integration**: Simple and intuitive API.
 - **Flexible Sources**: Load from files, environment variables (with custom prefixes), Consul, and easily extend with custom sources.
-- **Format Agnostic**: Supports JSON, YAML, and other formats via extensible codecs.
+- **Format Agnostic**: Supports JSON, YAML, TOML, and other formats via extensible codecs.
+- **Type Casting**: Built-in caster codecs for automatic type conversion (bool, int, float, time, duration, etc.).
 - **Hierarchical Merging**: Configurations from multiple sources are merged, with later sources overriding earlier ones.
 - **Struct Binding**: Automatically map configuration data to Go structs.
 - **Built-in Validation**: Validate configuration using struct methods, JSON Schemas, or custom functions.
@@ -55,67 +58,263 @@ Here's a minimal example to get you started:
 package main
 
 import (
-	"go.companyinfo.dev/conflex"
-	"go.companyinfo.dev/conflex/codec"
-	"context"
-	"log"
+    "go.companyinfo.dev/conflex"
+    "go.companyinfo.dev/conflex/codec"
+    "context"
+    "log"
 )
 
 func main() {
-	cfg, err := conflex.New(
-		conflex.WithFileSource("config.yaml", codec.TypeYAML),
-		conflex.WithFileSource("config.json", codec.TypeJSON),
-		// Optionally add remote sources, e.g. Consul
-		conflex.WithConsulSource("staging/service", codec.TypeJSON),
-	)
-	if err != nil {
-		log.Fatalf("failed to create configuration: %v", err)
-	}
+    cfg, err := conflex.New(
+        conflex.WithFileSource("config.yaml", codec.TypeYAML),
+        conflex.WithFileSource("config.json", codec.TypeJSON),
+        // Optionally add remote sources, e.g. Consul
+        conflex.WithConsulSource("staging/service", codec.TypeJSON),
+    )
+    if err != nil {
+        log.Fatalf("failed to create configuration: %v", err)
+    }
 
-	if err := cfg.Load(context.Background()); err != nil {
-		log.Fatalf("failed to load configuration: %v", err)
-	}
+    if err := cfg.Load(context.Background()); err != nil {
+        log.Fatalf("failed to load configuration: %v", err)
+    }
 
-	// Access configuration values
-	port := cfg.GetInt("server.port")
-	host := cfg.GetString("server.host")
-	log.Printf("Server is running on %s:%d", host, port)
+    // Access configuration values
+    port := cfg.GetInt("server.port")
+    host := cfg.GetString("server.host")
+    log.Printf("Server is running on %s:%d", host, port)
 }
 ```
 
 ### How it works
+
 - **Sources** are loaded in order; later sources override earlier ones.
 - **Dot notation** allows deep access: `cfg.Get("database.host")`.
 - **Type-safe accessors**: `GetString`, `GetInt`, `GetBool`, etc.
 
+### Built-in Codecs
+
+Conflex comes with several built-in codecs:
+
+- **JSON**: `codec.TypeJSON` - Standard JSON format
+- **YAML**: `codec.TypeYAML` - YAML format
+- **TOML**: `codec.TypeTOML` - TOML format
+- **Environment Variables**: `codec.TypeEnvVar` - For environment variable parsing
+
 ## Advanced Usage
 
 ### Struct Binding
+
 Bind configuration directly to your own struct:
 
 ```go
 type Config struct {
-	Port int    `conflex:"server.port"`
-	Host string `conflex:"server.host"`
+    Port int    `conflex:"port"`
+    Host string `conflex:"host"`
 }
 
 var c Config
 cfg, _ := conflex.New(
-	conflex.WithFileSource("config.yaml", codec.TypeYAML),
-	conflex.WithBinding(&c),
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithBinding(&c),
 )
 cfg.Load(context.Background())
 // c.Port and c.Host are now populated
 ```
 
-### Merging and Precedence
+### Environment Variable Naming Conventions
+
+Conflex provides powerful environment variable support that automatically maps environment variables to nested configuration structures. This follows the [Twelve-Factor App methodology](https://12factor.net/config) for configuration management.
+
+#### Basic Usage
+
+```go
+cfg, _ := conflex.New(
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithOSEnvVarSource("MYAPP_"), // Only env vars with prefix MYAPP_
+)
+```
+
+#### Naming Convention Rules
+
+Conflex uses a **hierarchical naming convention** where underscores (`_`) in environment variable names create nested configuration structures:
+
+1. **Environment variables are converted to lowercase**
+2. **Underscores (`_`) create nested levels**
+3. **Empty parts (consecutive underscores) are filtered out**
+4. **Values are automatically trimmed of whitespace**
+
+#### Examples
+
+| Environment Variable | Configuration Path | Value |
+|---------------------|-------------------|-------|
+| `MYAPP_SERVER_PORT` | `server.port` | `8080` |
+| `MYAPP_DATABASE_HOST` | `database.host` | `localhost` |
+| `MYAPP_DATABASE_USER_NAME` | `database.user.name` | `admin` |
+| `MYAPP_FOO__BAR` | `foo.bar` | `value` |
+| `MYAPP_A_B_C_D` | `a.b.c.d` | `nested` |
+
+#### Struct Field Mapping
+
+When using struct binding, environment variables map directly to struct fields using the `conflex` tag:
+
+```go
+type Config struct {
+    Port     int    `conflex:"port"`
+    Host     string `conflex:"host"`
+    Database struct {
+        Host     string `conflex:"host"`
+        Port     int    `conflex:"port"`
+        Username string `conflex:"username"`
+        Password string `conflex:"password"`
+    } `conflex:"database"`
+}
+```
+
+**Environment variables needed:**
+
+```bash
+export MYAPP_PORT=8080
+export MYAPP_HOST=localhost
+export MYAPP_DATABASE_HOST=db.example.com
+export MYAPP_DATABASE_PORT=5432
+export MYAPP_DATABASE_USERNAME=admin
+export MYAPP_DATABASE_PASSWORD=secret123
+```
+
+#### Advanced Examples
+
+**Complex Nested Configuration:**
+
+```go
+type AppConfig struct {
+    Server struct {
+        Host string `conflex:"host"`
+        Port int    `conflex:"port"`
+        TLS  struct {
+            Enabled  bool   `conflex:"enabled"`
+            CertFile string `conflex:"cert_file"`
+            KeyFile  string `conflex:"key_file"`
+        } `conflex:"tls"`
+    } `conflex:"server"`
+    Database struct {
+        Primary struct {
+            Host     string `conflex:"host"`
+            Port     int    `conflex:"port"`
+            Database string `conflex:"database"`
+        } `conflex:"primary"`
+        Replica struct {
+            Host     string `conflex:"host"`
+            Port     int    `conflex:"port"`
+            Database string `conflex:"database"`
+        } `conflex:"replica"`
+    } `conflex:"database"`
+}
+```
+
+**Required environment variables:**
+
+```bash
+export MYAPP_SERVER_HOST=0.0.0.0
+export MYAPP_SERVER_PORT=8080
+export MYAPP_SERVER_TLS_ENABLED=true
+export MYAPP_SERVER_TLS_CERT_FILE=/etc/ssl/certs/server.crt
+export MYAPP_SERVER_TLS_KEY_FILE=/etc/ssl/private/server.key
+export MYAPP_DATABASE_PRIMARY_HOST=primary.db.example.com
+export MYAPP_DATABASE_PRIMARY_PORT=5432
+export MYAPP_DATABASE_PRIMARY_DATABASE=myapp
+export MYAPP_DATABASE_REPLICA_HOST=replica.db.example.com
+export MYAPP_DATABASE_REPLICA_PORT=5432
+export MYAPP_DATABASE_REPLICA_DATABASE=myapp
+```
+
+#### Edge Cases and Special Handling
+
+**Consecutive Underscores:**
+
+- `MYAPP_FOO__BAR` → `foo.bar` (empty parts filtered out)
+- `MYAPP_A___B` → `a.b` (multiple empty parts filtered)
+
+**Type Conflicts:**
+If an environment variable creates a conflict between scalar and nested values, the nested structure takes precedence:
+
+```bash
+export MYAPP_FOO=scalar_value
+export MYAPP_FOO_BAR=nested_value
+# Result: foo.bar = "nested_value" (scalar "foo" is overwritten)
+```
+
+**Whitespace Handling:**
+
+- Keys and values are automatically trimmed of whitespace
+- `MYAPP_KEY = value` → `key = "value"`
+
+#### Best Practices
+
+1. **Use Descriptive Prefixes:** Always use application-specific prefixes to avoid conflicts
+
+   ```bash
+   # Good
+   export MYAPP_DATABASE_HOST=localhost
+   export WEBAPP_DATABASE_HOST=localhost
+   
+   # Avoid
+   export DATABASE_HOST=localhost  # Too generic
+   ```
+
+2. **Consistent Naming:** Use consistent naming patterns across your application
+
+   ```bash
+   # Consistent pattern
+   export MYAPP_SERVER_HOST=localhost
+   export MYAPP_SERVER_PORT=8080
+   export MYAPP_SERVER_TIMEOUT=30s
+   ```
+
+3. **Documentation:** Document your environment variables in your application's README
+
+   ```bash
+   # Required environment variables:
+   # MYAPP_SERVER_HOST - Server hostname (default: localhost)
+   # MYAPP_SERVER_PORT - Server port (default: 8080)
+   # MYAPP_DATABASE_HOST - Database hostname
+   # MYAPP_DATABASE_PORT - Database port (default: 5432)
+   ```
+
+4. **Validation:** Use struct validation to ensure required environment variables are set
+
+   ```go
+   func (c *Config) Validate() error {
+       if c.Server.Host == "" {
+           return errors.New("MYAPP_SERVER_HOST is required")
+       }
+       if c.Server.Port <= 0 {
+           return errors.New("MYAPP_SERVER_PORT must be positive")
+       }
+       return nil
+   }
+   ```
+
+#### Merging and Precedence
+
 - Multiple sources are merged; later sources override earlier ones.
 - Environment variables can override file/remote config:
 
 ```go
 cfg, _ := conflex.New(
-	conflex.WithFileSource("config.yaml", codec.TypeYAML),
-	conflex.WithOSEnvVarSource("MYAPP_"), // Only env vars with prefix MYAPP_
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithOSEnvVarSource("MYAPP_"), // Only env vars with prefix MYAPP_
+)
+```
+
+### Content Sources
+
+Load configuration from byte slices (useful for testing or dynamic configuration):
+
+```go
+configData := []byte(`{"server": {"port": 8080, "host": "localhost"}}`)
+cfg, _ := conflex.New(
+    conflex.WithContentSource(configData, codec.TypeJSON),
 )
 ```
 
@@ -123,7 +322,7 @@ cfg, _ := conflex.New(
 
 ```go
 cfg, _ := conflex.New(
-	conflex.WithConsulSource("production/service", codec.TypeJSON),
+    conflex.WithConsulSource("production/service", codec.TypeJSON),
 )
 ```
 
@@ -133,8 +332,8 @@ cfg, _ := conflex.New(
 
 ```go
 cfg, _ := conflex.New(
-	conflex.WithFileSource("config.yaml", codec.TypeYAML),
-	conflex.WithFileDumper("out.yaml", codec.TypeYAML),
+    conflex.WithFileSource("config.yaml", codec.TypeYAML),
+    conflex.WithFileDumper("out.yaml", codec.TypeYAML),
 )
 cfg.Load(context.Background())
 cfg.Dump(context.Background()) // Writes merged config to out.yaml
@@ -196,8 +395,11 @@ cfg, _ := conflex.New(
 )
 ```
 
+**Note:** If you need type conversion functionality, consider using the built-in caster codecs (e.g., `codec.TypeCasterInt`, `codec.TypeCasterBool`) instead of creating a custom codec for simple type casting.
+
 ### When to Use a Custom Codec
-- Supporting formats not built-in (e.g., TOML, XML, encrypted configs)
+
+- Supporting formats not built-in (e.g., XML, encrypted configs)
 - Integrating with legacy or proprietary configuration formats
 - Adding validation or transformation logic during encode/decode
 
@@ -218,6 +420,7 @@ type Validator interface {
 ```
 
 **Example:**
+
 ```go
 type MyConfig struct {
     Port int `conflex:"port"`
@@ -297,8 +500,8 @@ import (
 )
 
 type Config struct {
-    Port int    `conflex:"server.port"`
-    Host string `conflex:"server.host"`
+    Port int    `conflex:"port"`
+    Host string `conflex:"host"`
 }
 
 func (c *Config) Validate() error {
@@ -334,6 +537,7 @@ if err := cfg.Load(context.Background()); err != nil {
 ## Sample Configuration Files
 
 **YAML (`config.yaml`):**
+
 ```yaml
 server:
   port: 8080
@@ -342,6 +546,7 @@ feature_enabled: true
 ```
 
 **JSON (`config.json`):**
+
 ```json
 {
   "server": {
@@ -350,6 +555,16 @@ feature_enabled: true
   },
   "feature_enabled": true
 }
+```
+
+**TOML (`config.toml`):**
+
+```toml
+[server]
+port = 8080
+host = "localhost"
+
+feature_enabled = true
 ```
 
 ## Testing & Best Practices
@@ -362,37 +577,54 @@ feature_enabled: true
 ## Troubleshooting & FAQ
 
 **Q: Why is my struct not being populated?**
+
 - Make sure you pass a pointer to your struct to `WithBinding`.
-- Check your struct tags: use `conflex:"fieldname"`.
+- Check your struct tags: use `conflex:"fieldname"` for the field name within its context.
 
 **Q: How do I override config with environment variables?**
+
 - Use `WithOSEnvVarSource("PREFIX_")` and set env vars like `PREFIX_SERVER_PORT=8080`.
+- Environment variables follow the naming convention: `PREFIX_SECTION_SUBSECTION_KEY=value`
+- For nested structures, use underscores: `PREFIX_DATABASE_USER_NAME=admin` maps to `database.user.name`
+
+**Q: How do environment variables map to struct fields?**
+
+- Environment variables are converted to lowercase and split by underscores
+- Use the `conflex` tag to map to the field name within its struct context: `conflex:"port"`
+- Example: `MYAPP_SERVER_PORT=8080` with tag `conflex:"port"` in a struct tagged with `conflex:"server"` populates the struct field
+
+**Q: What happens with consecutive underscores in environment variable names?**
+
+- Consecutive underscores are filtered out: `MYAPP_FOO__BAR` becomes `foo.bar`
+- This allows for cleaner environment variable names while maintaining the same configuration structure
 
 **Q: How do I add a new config source or dumper?**
+
 - Implement the `Source` or `Dumper` interface and pass it to `WithSource` or `WithDumper`.
 
 **Q: How do I access nested values?**
+
 - Use dot notation: `cfg.Get("outer.inner.key")`.
 
 **Q: What happens if a source returns nil or an error?**
+
 - If a source returns an error, `Load` will return it. If a source returns nil, it is skipped.
 
 ## Roadmap and Future Plans
 
 - [ ] **Additional Configuration Formats:**
-    - [ ] TOML (Tom's Obvious, Minimal Language)
-    - [ ] HCL (HashiCorp Configuration Language)
-    - [ ] INI
+  - [ ] HCL (HashiCorp Configuration Language)
+  - [ ] INI
 - [ ] **Additional Configuration Sources:**
-    - [ ] Command-line flags (e.g., `--host=localhost`)
-    - [ ] HashiCorp Vault
-    - [ ] Etcd
-    - [ ] Apache ZooKeeper
-    - [ ] Redis / Valkey
-    - [ ] Memcached
+  - [ ] Command-line flags (e.g., `--host=localhost`)
+  - [ ] HashiCorp Vault
+  - [ ] Etcd
+  - [ ] Apache ZooKeeper
+  - [ ] Redis / Valkey
+  - [ ] Memcached
 - [ ] **Advanced Features:**
-    - [ ] Hot reloading of configuration changes
-    - [ ] Decryption of sensitive configuration values (e.g., SOPS integration)
+  - [ ] Hot reloading of configuration changes
+  - [ ] Decryption of sensitive configuration values (e.g., SOPS integration)
 
 ## Contributing
 
@@ -406,6 +638,7 @@ Contributions are welcome! Here's how you can contribute:
 6. Create a Pull Request
 
 Please make sure to:
+
 - Follow the existing code style
 - Add tests if applicable
 - Update documentation as needed

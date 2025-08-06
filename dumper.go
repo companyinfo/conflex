@@ -17,7 +17,7 @@ package conflex
 
 import "context"
 
-// Dumper is an interface that defines a method for dumping a map of string to interface{} values.
+// Dumper is an interface that defines a method for dumping a map of string to any values.
 type Dumper interface {
-	Dump(ctx context.Context, values *map[string]interface{}) error
+	Dump(ctx context.Context, values *map[string]any) error
 }
