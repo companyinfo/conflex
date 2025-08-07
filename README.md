@@ -15,6 +15,7 @@ handling application settings across different environments and formats.
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Error Handling](#error-handling)
 - [Advanced Usage](#advanced-usage)
   - [Environment Variable Naming Conventions](#environment-variable-naming-conventions)
 - [Custom Codecs](#custom-codecs)
@@ -43,6 +44,8 @@ handling application settings across different environments and formats.
 - **Configuration Dumping**: Save the effective configuration to files or other custom destinations.
 - **Clear Error Handling**: Provides comprehensive error information for easier debugging.
 - **Thread-Safe**: Safe for concurrent access and configuration loading in multi-goroutine applications.
+- **Nil-Safe Operations**: All getter methods handle nil Conflex instances gracefully, returning appropriate zero values or errors.
+- **Consistent Return Types**: Error versions of getter methods return empty types (empty slices, maps) instead of nil for missing keys.
 
 ## Installation
 
@@ -91,6 +94,8 @@ func main() {
 - **Sources** are loaded in order; later sources override earlier ones.
 - **Dot notation** allows deep access: `cfg.Get("database.host")`.
 - **Type-safe accessors**: `GetString`, `GetInt`, `GetBool`, etc.
+- **Context validation**: Both `Load()` and `Dump()` methods validate that context is not nil.
+- **Error handling**: All methods return descriptive errors for easier debugging.
 
 ### Built-in Codecs
 
@@ -100,6 +105,73 @@ Conflex comes with several built-in codecs:
 - **YAML**: `codec.TypeYAML` - YAML format
 - **TOML**: `codec.TypeTOML` - TOML format
 - **Environment Variables**: `codec.TypeEnvVar` - For environment variable parsing
+
+#### Caster Codecs
+
+Conflex also provides caster codecs for automatic type conversion:
+
+- **Boolean**: `codec.TypeCasterBool` - Converts to bool
+- **Integer**: `codec.TypeCasterInt`, `codec.TypeCasterInt8`, `codec.TypeCasterInt16`, `codec.TypeCasterInt32`, `codec.TypeCasterInt64`
+- **Unsigned Integer**: `codec.TypeCasterUint`, `codec.TypeCasterUint8`, `codec.TypeCasterUint16`, `codec.TypeCasterUint32`, `codec.TypeCasterUint64`
+- **Float**: `codec.TypeCasterFloat32`, `codec.TypeCasterFloat64`
+- **String**: `codec.TypeCasterString` - Converts to string
+- **Time**: `codec.TypeCasterTime` - Converts to time.Time
+- **Duration**: `codec.TypeCasterDuration` - Converts to time.Duration
+
+> **Note:** Environment variable codec (`codec.TypeEnvVar`) only supports decoding. Attempting to encode will return an error indicating that encoding to environment variables is not supported.
+
+## Error Handling
+
+Conflex provides comprehensive error handling with detailed context information through the `ConfigError` type.
+
+### ConfigError Structure
+
+```go
+type ConfigError struct {
+    Source    string // The source where the error occurred (e.g., "source[0]", "json-schema", "binding")
+    Field     string // The specific field where the error occurred (optional)
+    Operation string // The operation being performed (e.g., "load", "validate", "bind", "merge")
+    Err       error  // The underlying error
+}
+```
+
+### Error Examples
+
+```go
+// Source loading error
+err := cfg.Load(context.Background())
+// Error: "config error in source[0] during load: failed to read file: no such file or directory"
+
+// Validation error
+err := cfg.Load(context.Background())
+// Error: "config error in json-schema during validate: invalid schema"
+
+// Binding error
+err := cfg.Load(context.Background())
+// Error: "config error in binding during bind: failed to decode configuration"
+```
+
+### Getter Method Error Handling
+
+Getter methods come in two variants:
+
+1. **Non-error versions**: Return zero values for missing keys or nil instances
+
+   ```go
+   cfg.GetString("nonexistent") // Returns empty string
+   cfg.GetInt("nonexistent")    // Returns 0
+   cfg.GetBool("nonexistent")   // Returns false
+   ```
+
+2. **Error versions**: Return errors for missing keys or nil instances
+
+   ```go
+   cfg.GetStringE("nonexistent") // Returns ("", error)
+   cfg.GetIntE("nonexistent")    // Returns (0, error)
+   cfg.GetBoolE("nonexistent")   // Returns (false, error)
+   ```
+
+When called on a nil Conflex instance, error versions return "conflex instance is nil" error.
 
 ## Advanced Usage
 
@@ -338,6 +410,22 @@ cfg, _ := conflex.New(
 cfg.Load(context.Background())
 cfg.Dump(context.Background()) // Writes merged config to out.yaml
 ```
+
+#### Configurable File Permissions
+
+You can customize file permissions when dumping configuration:
+
+```go
+import "go.companyinfo.dev/conflex/dumper"
+
+// Use default permissions (0644)
+fileDumper := dumper.NewFile("config.yaml", encoder)
+
+// Use custom permissions
+fileDumper := dumper.NewFileWithPermissions("config.yaml", encoder, 0600)
+```
+
+The default file permissions are defined by the `DefaultFilePermissions` constant (0644).
 
 ## Custom Codecs
 
@@ -609,6 +697,18 @@ feature_enabled = true
 **Q: What happens if a source returns nil or an error?**
 
 - If a source returns an error, `Load` will return it. If a source returns nil, it is skipped.
+
+**Q: What happens when I call getter methods on a nil Conflex instance?**
+
+- Non-error versions return appropriate zero values (empty string, 0, false, etc.)
+- Error versions return "conflex instance is nil" error
+- This prevents panic and provides graceful degradation
+
+**Q: What do getter methods return for missing keys?**
+
+- Non-error versions return zero values for the type (empty string, 0, false, empty slices/maps)
+- Error versions return the zero value plus an error describing the missing key
+- Error versions for slice/map types return empty slices/maps instead of nil for consistency
 
 ## Roadmap and Future Plans
 

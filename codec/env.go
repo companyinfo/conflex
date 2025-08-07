@@ -36,9 +36,8 @@ type EnvVarCodec struct{}
 // Encode encodes the provided value to environment variable format.
 // This method is provided for interface compatibility but environment variables are typically read-only.
 func (EnvVarCodec) Encode(_ any) ([]byte, error) {
-	// Environment variables are typically read-only, so this is a no-op implementation
-	// that returns an empty byte slice to satisfy the Encoder interface
-	return []byte{}, nil
+	// Environment variables are typically read-only, so encoding is not supported
+	return nil, fmt.Errorf("encoding to environment variables is not supported")
 }
 
 // Decode decodes the provided data bytes into a configuration map.

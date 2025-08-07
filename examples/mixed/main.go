@@ -12,145 +12,135 @@ import (
 
 // WebAppConfig represents a web application configuration without validation
 type WebAppConfig struct {
-	Server     ServerConfig     `conflex:"server"`
-	Database   DatabaseConfig   `conflex:"database"`
-	Redis      RedisConfig      `conflex:"redis"`
-	Auth       AuthConfig       `conflex:"auth"`
-	Logging    LoggingConfig    `conflex:"logging"`
-	Monitoring MonitoringConfig `conflex:"monitoring"`
-	Features   FeaturesConfig   `conflex:"features"`
+	Server     ServerConfig
+	Database   DatabaseConfig
+	Redis      RedisConfig
+	Auth       AuthConfig
+	Logging    LoggingConfig
+	Monitoring MonitoringConfig
+	Features   FeaturesConfig
 }
 
 // ServerConfig represents server configuration settings
 type ServerConfig struct {
-	Host         string        `conflex:"host"`
-	Port         int           `conflex:"port"`
-	ReadTimeout  time.Duration `conflex:"read.timeout"`
-	WriteTimeout time.Duration `conflex:"write.timeout"`
-	TLS          TLSConfig     `conflex:"tls"`
+	Host         string
+	Port         int
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	TLS          TLSConfig
 }
 
 // TLSConfig represents TLS/SSL configuration settings
 type TLSConfig struct {
-	Enabled bool       `conflex:"enabled"`
-	Cert    CertConfig `conflex:"cert"`
-	Key     KeyConfig  `conflex:"key"`
-}
-
-// CertConfig represents TLS certificate configuration
-type CertConfig struct {
-	File string `conflex:"file"`
-}
-
-// KeyConfig represents TLS private key configuration
-type KeyConfig struct {
-	File string `conflex:"file"`
+	Enabled  bool
+	CertFile string
+	KeyFile  string
 }
 
 // DatabaseConfig represents database configuration settings
 type DatabaseConfig struct {
-	Primary PrimaryConfig `conflex:"primary"`
-	Replica ReplicaConfig `conflex:"replica"`
-	Pool    PoolConfig    `conflex:"pool"`
+	Primary PrimaryConfig
+	Replica ReplicaConfig
+	Pool    PoolConfig
 }
 
 // PrimaryConfig represents primary database connection settings
 type PrimaryConfig struct {
-	Host     string `conflex:"host"`
-	Port     int    `conflex:"port"`
-	Database string `conflex:"database"`
-	Username string `conflex:"username"`
-	Password string `conflex:"password"`
-	SSLMode  string `conflex:"ssl.mode"`
+	Host     string
+	Port     int
+	Database string
+	Username string
+	Password string
+	SSLMode  string
 }
 
 // ReplicaConfig represents replica database connection settings
 type ReplicaConfig struct {
-	Host     string `conflex:"host"`
-	Port     int    `conflex:"port"`
-	Database string `conflex:"database"`
-	Username string `conflex:"username"`
-	Password string `conflex:"password"`
-	SSLMode  string `conflex:"ssl.mode"`
+	Host     string
+	Port     int
+	Database string
+	Username string
+	Password string
+	SSLMode  string
 }
 
 // PoolConfig represents database connection pool settings
 type PoolConfig struct {
-	Max MaxConfig `conflex:"max"`
+	Max MaxConfig
 }
 
 // MaxConfig represents maximum connection pool limits
 type MaxConfig struct {
-	Open     int           `conflex:"open"`
-	Idle     int           `conflex:"idle"`
-	Lifetime time.Duration `conflex:"lifetime"`
+	Open     int
+	Idle     int
+	Lifetime time.Duration
 }
 
 // RedisConfig represents Redis connection settings
 type RedisConfig struct {
-	Host     string        `conflex:"host"`
-	Port     int           `conflex:"port"`
-	Password string        `conflex:"password"`
-	Database int           `conflex:"database"`
-	Timeout  time.Duration `conflex:"timeout"`
+	Host     string
+	Port     int
+	Password string
+	Database int
+	Timeout  time.Duration
 }
 
 // AuthConfig represents authentication configuration settings
 type AuthConfig struct {
-	JWT     JWTConfig     `conflex:"jwt"`
-	Token   TokenConfig   `conflex:"token"`
-	Refresh RefreshConfig `conflex:"refresh"`
+	JWT     JWTConfig
+	Token   TokenConfig
+	Refresh RefreshConfig
 }
 
 // JWTConfig represents JWT authentication settings
 type JWTConfig struct {
-	Secret string `conflex:"secret"`
+	Secret string
 }
 
 // TokenConfig represents token configuration settings
 type TokenConfig struct {
-	Duration time.Duration `conflex:"duration"`
+	Duration time.Duration
 }
 
 // RefreshConfig represents refresh token configuration settings
 type RefreshConfig struct {
-	Secret string `conflex:"secret"`
+	Secret string
 }
 
 // LoggingConfig represents logging configuration settings
 type LoggingConfig struct {
-	Level      string `conflex:"level"`
-	Format     string `conflex:"format"`
-	OutputFile string `conflex:"output.file"`
+	Level      string
+	Format     string
+	OutputFile string
 }
 
 // MonitoringConfig represents monitoring and metrics configuration
 type MonitoringConfig struct {
-	Enabled     bool   `conflex:"enabled"`
-	MetricsPort int    `conflex:"metrics.port"`
-	HealthPath  string `conflex:"health.path"`
+	Enabled     bool
+	MetricsPort int
+	HealthPath  string
 }
 
 // FeaturesConfig represents feature flags and settings
 type FeaturesConfig struct {
-	RateLimit RateLimitConfig `conflex:"rate.limit"`
-	Cache     CacheConfig     `conflex:"cache"`
-	Debug     DebugConfig     `conflex:"debug"`
+	RateLimit RateLimitConfig
+	Cache     CacheConfig
+	Debug     DebugConfig
 }
 
 // RateLimitConfig represents rate limiting configuration
 type RateLimitConfig struct {
-	Enabled bool `conflex:"enabled"`
+	Enabled bool
 }
 
 // CacheConfig represents caching configuration
 type CacheConfig struct {
-	Enabled bool `conflex:"enabled"`
+	Enabled bool
 }
 
 // DebugConfig represents debug mode settings
 type DebugConfig struct {
-	Mode bool `conflex:"mode"`
+	Mode bool
 }
 
 // PrintConfig displays the configuration in a readable format
@@ -161,8 +151,8 @@ func (c *WebAppConfig) PrintConfig() {
 	fmt.Printf("  Write Timeout: %v\n", c.Server.WriteTimeout)
 	fmt.Printf("  TLS Enabled: %t\n", c.Server.TLS.Enabled)
 	if c.Server.TLS.Enabled {
-		fmt.Printf("  TLS Cert: %s\n", c.Server.TLS.Cert.File)
-		fmt.Printf("  TLS Key: %s\n", c.Server.TLS.Key.File)
+		fmt.Printf("  TLS Cert: %s\n", c.Server.TLS.CertFile)
+		fmt.Printf("  TLS Key: %s\n", c.Server.TLS.KeyFile)
 	}
 
 	fmt.Printf("\nDatabase Primary: %s:%d/%s\n",
@@ -242,4 +232,9 @@ func main() {
 	fmt.Println("")
 	fmt.Println("Example: If YAML has server.port=3000 and env has WEBAPP_SERVER_PORT=8080")
 	fmt.Println("The final value will be 8080 (environment variable wins)")
+	fmt.Println("")
+	fmt.Println("Note: Environment variables create lowercase keys. For best compatibility:")
+	fmt.Println("- Use simple keys: server.port -> WEBAPP_SERVER_PORT")
+	fmt.Println("- For nested keys: database.primary.host -> WEBAPP_DATABASE_PRIMARY_HOST")
+	fmt.Println("- Avoid camelCase in YAML if you need env var overrides for those keys")
 }

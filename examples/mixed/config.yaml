@@ -4,16 +4,12 @@
 server:
   host: "localhost"
   port: 3000
-  read:
-    timeout: "30s"
-  write:
-    timeout: "30s"
+  readTimeout: "30s"
+  writetimeout: "30s"
   tls:
     enabled: false
-    cert:
-      file: "/etc/ssl/certs/server.crt"
-    key:
-      file: "/etc/ssl/private/server.key"
+    certFile: "/etc/ssl/certs/server.crt"
+    keyFile: "/etc/ssl/private/server.key"
 
 database:
   primary:

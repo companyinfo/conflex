@@ -34,7 +34,6 @@ import (
 	"go.companyinfo.dev/conflex/codec"
 	"go.companyinfo.dev/conflex/dumper"
 	"go.companyinfo.dev/conflex/source"
-	"golang.org/x/exp/maps"
 )
 
 // Option is a functional option that can be used to configure a Conflex instance.
@@ -85,7 +84,7 @@ func WithFileDumper(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		encoder, err := codec.GetEncoder(codecType)
 		if err != nil {
-			return fmt.Errorf("failed to get encoder: %w", err)
+			return NewConfigError("file-dumper", "get-encoder", err)
 		}
 
 		c.dumpers = append(c.dumpers, dumper.NewFile(path, encoder))
@@ -98,7 +97,7 @@ func WithFileSource(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
 		if err != nil {
-			return fmt.Errorf("failed to get decoder: %w", err)
+			return NewConfigError("file-source", "get-decoder", err)
 		}
 
 		c.sources = append(c.sources, source.NewFile(path, decoder))
@@ -111,7 +110,7 @@ func WithContentSource(data []byte, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
 		if err != nil {
-			return fmt.Errorf("failed to get decoder: %w", err)
+			return NewConfigError("content-source", "get-decoder", err)
 		}
 
 		c.sources = append(c.sources, source.NewFileContent(data, decoder))
@@ -138,12 +137,12 @@ func WithConsulSource(path string, codecType codec.Type) Option {
 	return func(c *Conflex) error {
 		decoder, err := codec.GetDecoder(codecType)
 		if err != nil {
-			return fmt.Errorf("failed to get decoder: %w", err)
+			return NewConfigError("consul-source", "get-decoder", err)
 		}
 
 		l, err := source.NewConsul(path, decoder, nil)
 		if err != nil {
-			return err
+			return NewConfigError("consul-source", "create-client", err)
 		}
 
 		c.sources = append(c.sources, l)
@@ -244,67 +243,51 @@ func (c *Conflex) getDecoderConfig() *mapstructure.DecoderConfig {
 	return c.decoderConfig
 }
 
-// loadSourcesParallel loads configuration data from all sources in parallel for better performance.
-func (c *Conflex) loadSourcesParallel(ctx context.Context) (map[string]any, error) {
+// normalizeMapKeys recursively converts all map keys to lowercase for case-insensitive merging
+func normalizeMapKeys(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	normalized := make(map[string]any)
+	for k, v := range m {
+		lowerKey := strings.ToLower(k)
+		if nestedMap, ok := v.(map[string]any); ok {
+			normalized[lowerKey] = normalizeMapKeys(nestedMap)
+		} else {
+			normalized[lowerKey] = v
+		}
+	}
+	return normalized
+}
+
+// loadSourcesSequential loads configuration data from all sources sequentially to avoid race conditions.
+func (c *Conflex) loadSourcesSequential(ctx context.Context) (map[string]any, error) {
 	if len(c.sources) == 0 {
 		return make(map[string]any), nil
 	}
 
-	type result struct {
-		config map[string]any
-		index  int
-		err    error
-	}
-
-	results := make(chan result, len(c.sources))
-	done := make(chan struct{})
-	defer close(done)
-
-	// Load all sources in parallel
-	for i, source := range c.sources {
-		go func(idx int, src Source) {
-			select {
-			case <-done:
-				return
-			default:
-				conf, err := src.Load(ctx)
-				if err != nil {
-					err = NewConfigError(fmt.Sprintf("source[%d]", idx), "load", err)
-				}
-				// Ensure we always send a valid map, even if source returns nil
-				if conf == nil {
-					conf = make(map[string]any)
-				}
-				select {
-				case results <- result{config: conf, index: idx, err: err}:
-				case <-done:
-					return
-				}
-			}
-		}(i, source)
-	}
-
-	// Collect results
-	configs := make([]map[string]any, len(c.sources))
-	for range c.sources {
-		select {
-		case res := <-results:
-			if res.err != nil {
-				return nil, res.err
-			}
-			configs[res.index] = res.config
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-
 	// Merge in order to maintain precedence
 	newValues := make(map[string]any)
-	for i, conf := range configs {
-		if conf == nil {
-			continue // Skip nil configurations
+	for i, source := range c.sources {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		if err := mergo.Merge(&newValues, conf, mergo.WithOverride); err != nil {
+
+		conf, err := source.Load(ctx)
+		if err != nil {
+			return nil, NewConfigError(fmt.Sprintf("source[%d]", i), "load", err)
+		}
+
+		// Ensure we always have a valid map, even if source returns nil
+		if conf == nil {
+			conf = make(map[string]any)
+		}
+
+		// Normalize keys to lowercase for case-insensitive merging
+		normalizedConf := normalizeMapKeys(conf)
+
+		// Use mergo to merge configuration maps with override behavior
+		if err := mergo.Map(&newValues, normalizedConf, mergo.WithOverride); err != nil {
 			return nil, NewConfigError(fmt.Sprintf("source[%d]", i), "merge", err)
 		}
 	}
@@ -320,7 +303,7 @@ func (c *Conflex) Load(ctx context.Context) error {
 		return errors.New("context cannot be nil")
 	}
 
-	newValues, err := c.loadSourcesParallel(ctx)
+	newValues, err := c.loadSourcesSequential(ctx)
 	if err != nil {
 		return err
 	}
@@ -376,13 +359,21 @@ func (c *Conflex) Load(ctx context.Context) error {
 
 // Dump writes the current configuration values to the registered dumpers.
 func (c *Conflex) Dump(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
+
 	// Get a copy of the values to avoid holding locks during dumper calls
 	var valuesCopy map[string]any
 	func() {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
 		if c.values != nil {
-			valuesCopy = maps.Clone(*c.values)
+			// Use shallow copy for better performance
+			valuesCopy = make(map[string]any, len(*c.values))
+			for k, v := range *c.values {
+				valuesCopy[k] = v
+			}
 		} else {
 			valuesCopy = make(map[string]any)
 		}
@@ -398,6 +389,7 @@ func (c *Conflex) Dump(ctx context.Context) error {
 }
 
 func (c *Conflex) bind(values *map[string]any) error {
+	// Get the decoder config and set the result target
 	config := c.getDecoderConfig()
 	config.Result = c.binding
 
@@ -424,6 +416,7 @@ func (c *Conflex) bindAndValidate(values map[string]any) error {
 	}
 	tempBinding := reflect.New(bindingType).Interface()
 
+	// Get the decoder config and set the result target
 	config := c.getDecoderConfig()
 	config.Result = tempBinding
 
@@ -464,6 +457,7 @@ func (c *Conflex) Values() *map[string]any {
 // getValueFromMap retrieves the value associated with the given path from the internal values map.
 // The path is a dot-separated string that represents the nested structure of the map.
 // If the path is valid and the final value is found, it is returned. Otherwise, nil is returned.
+// Keys are case-insensitive since they are stored in lowercase.
 func (c *Conflex) getValueFromMap(path string) any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -475,13 +469,16 @@ func (c *Conflex) getValueFromMap(path string) any {
 	// Work with a copy of the current map to avoid race conditions during traversal
 	current := *c.values
 
+	// Normalize the path to lowercase for case-insensitive lookup
+	normalizedPath := strings.ToLower(path)
+
 	// 1. Check for direct key match first
-	if val, ok := current[path]; ok {
+	if val, ok := current[normalizedPath]; ok {
 		return val
 	}
 
 	// 2. Fallback to dot notation traversal
-	segments := strings.Split(path, ".")
+	segments := strings.Split(normalizedPath, ".")
 	for i, segment := range segments {
 		if currentMap, ok := current[segment]; ok {
 			if i == len(segments)-1 {
@@ -502,6 +499,9 @@ func (c *Conflex) getValueFromMap(path string) any {
 // Get returns the value associated with the given key as an any type.
 // If the key is not found, it returns nil.
 func (c *Conflex) Get(key string) any {
+	if c == nil {
+		return nil
+	}
 	if key == "" {
 		return nil
 	}
@@ -511,12 +511,18 @@ func (c *Conflex) Get(key string) any {
 // GetString returns the value associated with the given key as a string.
 // If the value is not found or cannot be converted to a string, an empty string is returned.
 func (c *Conflex) GetString(key string) string {
+	if c == nil {
+		return ""
+	}
 	return cast.ToString(c.Get(key))
 }
 
 // GetStringE returns the value associated with the given key as a string.
 // If the value is not found or cannot be converted to a string, it returns an error.
 func (c *Conflex) GetStringE(key string) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("conflex instance is nil")
+	}
 	val := c.Get(key)
 	if val == nil {
 		return "", fmt.Errorf("key %q not found", key)
@@ -527,12 +533,18 @@ func (c *Conflex) GetStringE(key string) (string, error) {
 // GetBool returns the value associated with the given key as a boolean.
 // If the value is not found or cannot be converted to a boolean, false is returned.
 func (c *Conflex) GetBool(key string) bool {
+	if c == nil {
+		return false
+	}
 	return cast.ToBool(c.Get(key))
 }
 
 // GetBoolE returns the value associated with the given key as a boolean.
 // If the value is not found or cannot be converted to a boolean, it returns an error.
 func (c *Conflex) GetBoolE(key string) (bool, error) {
+	if c == nil {
+		return false, fmt.Errorf("conflex instance is nil")
+	}
 	val := c.Get(key)
 	if val == nil {
 		return false, fmt.Errorf("key %q not found", key)
@@ -543,12 +555,18 @@ func (c *Conflex) GetBoolE(key string) (bool, error) {
 // GetInt returns the value associated with the given key as an integer.
 // If the value is not found or cannot be converted to an integer, 0 is returned.
 func (c *Conflex) GetInt(key string) int {
+	if c == nil {
+		return 0
+	}
 	return cast.ToInt(c.Get(key))
 }
 
 // GetIntE returns the value associated with the given key as an integer.
 // If the value is not found or cannot be converted to an integer, it returns an error.
 func (c *Conflex) GetIntE(key string) (int, error) {
+	if c == nil {
+		return 0, fmt.Errorf("conflex instance is nil")
+	}
 	val := c.Get(key)
 	if val == nil {
 		return 0, fmt.Errorf("key %q not found", key)
@@ -727,7 +745,7 @@ func (c *Conflex) GetIntSlice(key string) []int {
 func (c *Conflex) GetIntSliceE(key string) ([]int, error) {
 	val := c.Get(key)
 	if val == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return []int{}, fmt.Errorf("key %q not found", key)
 	}
 	return cast.ToIntSliceE(val)
 }
@@ -743,7 +761,7 @@ func (c *Conflex) GetStringSlice(key string) []string {
 func (c *Conflex) GetStringSliceE(key string) ([]string, error) {
 	val := c.Get(key)
 	if val == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return []string{}, fmt.Errorf("key %q not found", key)
 	}
 	return cast.ToStringSliceE(val)
 }
@@ -759,7 +777,7 @@ func (c *Conflex) GetStringMap(key string) map[string]any {
 func (c *Conflex) GetStringMapE(key string) (map[string]any, error) {
 	val := c.Get(key)
 	if val == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return map[string]any{}, fmt.Errorf("key %q not found", key)
 	}
 	return cast.ToStringMapE(val)
 }
@@ -775,7 +793,7 @@ func (c *Conflex) GetStringMapString(key string) map[string]string {
 func (c *Conflex) GetStringMapStringE(key string) (map[string]string, error) {
 	val := c.Get(key)
 	if val == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return map[string]string{}, fmt.Errorf("key %q not found", key)
 	}
 	return cast.ToStringMapStringE(val)
 }
@@ -791,7 +809,7 @@ func (c *Conflex) GetStringMapStringSlice(key string) map[string][]string {
 func (c *Conflex) GetStringMapStringSliceE(key string) (map[string][]string, error) {
 	val := c.Get(key)
 	if val == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return map[string][]string{}, fmt.Errorf("key %q not found", key)
 	}
 	return cast.ToStringMapStringSliceE(val)
 }

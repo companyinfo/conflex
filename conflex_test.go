@@ -18,10 +18,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.companyinfo.dev/conflex/codec"
 )
 
 type ConflexTestSuite struct {
@@ -947,4 +950,189 @@ type mockSlowSource struct {
 func (m *mockSlowSource) Load(_ context.Context) (map[string]any, error) {
 	time.Sleep(m.delay)
 	return m.conf, nil
+}
+
+func (s *ConflexTestSuite) TestConcurrentAccessToSameKey() {
+	// Test concurrent access to the same configuration key
+	src := &mockSource{conf: map[string]any{"shared": "value"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	var wg sync.WaitGroup
+	results := make([]string, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			results[index] = c.GetString("shared")
+		}(i)
+	}
+
+	wg.Wait()
+
+	// All goroutines should get the same value
+	for _, result := range results {
+		s.Equal("value", result)
+	}
+}
+
+func (s *ConflexTestSuite) TestLargeConfigurationMap() {
+	// Test with a large configuration map to ensure performance
+	largeConfig := make(map[string]any, 1000)
+	for i := 0; i < 1000; i++ {
+		largeConfig[fmt.Sprintf("key%d", i)] = fmt.Sprintf("value%d", i)
+	}
+
+	src := &mockSource{conf: largeConfig}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	// Test accessing various keys
+	s.Equal("value0", c.GetString("key0"))
+	s.Equal("value999", c.GetString("key999"))
+	s.Equal("value500", c.GetString("key500"))
+}
+
+func (s *ConflexTestSuite) TestMalformedConfigurationData() {
+	// Test handling of malformed configuration data
+	type malformedStruct struct {
+		InvalidField string `conflex:"invalid"`
+	}
+
+	var bind malformedStruct
+	src := &mockSource{conf: map[string]any{"invalid": 123}} // Type mismatch
+
+	c, err := New(WithSource(src), WithBinding(&bind))
+	s.NoError(err)
+
+	// Should handle type conversion gracefully
+	s.NoError(c.Load(context.Background()))
+	s.Equal("123", bind.InvalidField)
+}
+
+// mockContextAwareSource is a mock source that respects context cancellation
+type mockContextAwareSource struct {
+	conf map[string]any
+	err  error
+}
+
+func (m *mockContextAwareSource) Load(ctx context.Context) (map[string]any, error) {
+	// Simulate some work that can be cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(50 * time.Millisecond):
+		return m.conf, m.err
+	}
+}
+
+func (s *ConflexTestSuite) TestContextCancellation() {
+	// Test context cancellation during operations
+	src := &mockContextAwareSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	// Should return context error
+	err = c.Load(ctx)
+	s.Error(err)
+	s.Contains(err.Error(), "context")
+}
+
+func (s *ConflexTestSuite) TestNilConflexInstance() {
+	// Test behavior when Conflex instance is nil
+	var c *Conflex
+
+	// All getter methods should handle nil gracefully
+	s.Equal("", c.GetString("any"))
+	s.Equal(false, c.GetBool("any"))
+	s.Equal(0, c.GetInt("any"))
+	s.Equal(nil, c.Get("any"))
+
+	// Error versions should return appropriate errors
+	_, err := c.GetStringE("any")
+	s.Error(err)
+	s.Contains(err.Error(), "conflex instance is nil")
+}
+
+func (s *ConflexTestSuite) TestFilePermissionsConfigurable() {
+	// Test that file permissions are configurable
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+
+	// Create a temporary file for testing
+	tmpFile := s.T().TempDir() + "/test_config.yaml"
+
+	c, err := New(
+		WithSource(src),
+		WithFileDumper(tmpFile, codec.TypeYAML),
+	)
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+	s.NoError(c.Dump(context.Background()))
+
+	// Check that file was created with correct permissions
+	info, err := os.Stat(tmpFile)
+	s.NoError(err)
+	s.Equal(os.FileMode(0644), info.Mode().Perm())
+}
+
+func (s *ConflexTestSuite) TestEnvVarCodecEncodeError() {
+	// Test that EnvVarCodec.Encode returns proper error
+	codec := codec.EnvVarCodec{}
+	data, err := codec.Encode(map[string]any{"foo": "bar"})
+	s.Error(err)
+	s.Nil(data)
+	s.Contains(err.Error(), "encoding to environment variables is not supported")
+}
+
+func (s *ConflexTestSuite) TestDumpWithNilContext() {
+	// Test that Dump method validates context
+	src := &mockSource{conf: map[string]any{"foo": "bar"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	err = c.Dump(nil)
+	s.Error(err)
+	s.Contains(err.Error(), "context cannot be nil")
+}
+
+func (s *ConflexTestSuite) TestConsistentReturnTypes() {
+	// Test that error versions return consistent empty types instead of nil
+	src := &mockSource{conf: map[string]any{"existing": "value"}}
+	c, err := New(WithSource(src))
+	s.NoError(err)
+	s.NoError(c.Load(context.Background()))
+
+	// Test slice types return empty slices instead of nil
+	intSlice, err := c.GetIntSliceE("nonexistent")
+	s.Error(err)
+	s.NotNil(intSlice)
+	s.Len(intSlice, 0)
+
+	stringSlice, err := c.GetStringSliceE("nonexistent")
+	s.Error(err)
+	s.NotNil(stringSlice)
+	s.Len(stringSlice, 0)
+
+	// Test map types return empty maps instead of nil
+	stringMap, err := c.GetStringMapE("nonexistent")
+	s.Error(err)
+	s.NotNil(stringMap)
+	s.Len(stringMap, 0)
+
+	stringMapString, err := c.GetStringMapStringE("nonexistent")
+	s.Error(err)
+	s.NotNil(stringMapString)
+	s.Len(stringMapString, 0)
+
+	stringMapStringSlice, err := c.GetStringMapStringSliceE("nonexistent")
+	s.Error(err)
+	s.NotNil(stringMapStringSlice)
+	s.Len(stringMapStringSlice, 0)
 }

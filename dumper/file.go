@@ -18,21 +18,39 @@ package dumper
 import (
 	"context"
 	"fmt"
-	"go.companyinfo.dev/conflex/codec"
 	"os"
+
+	"go.companyinfo.dev/conflex/codec"
 )
 
 // File is a struct that represents a file-based configuration dumper.
 type File struct {
-	path    string
-	encoder codec.Encoder
+	path        string
+	encoder     codec.Encoder
+	permissions os.FileMode
 }
 
+const (
+	// DefaultFilePermissions represents the default file permissions for dumped configuration files
+	DefaultFilePermissions = 0644
+)
+
 // NewFile creates a new File instance with the given path and encoder.
+// It uses default file permissions of 0644.
 func NewFile(path string, encoder codec.Encoder) *File {
 	return &File{
-		path:    path,
-		encoder: encoder,
+		path:        path,
+		encoder:     encoder,
+		permissions: DefaultFilePermissions,
+	}
+}
+
+// NewFileWithPermissions creates a new File instance with the given path, encoder, and file permissions.
+func NewFileWithPermissions(path string, encoder codec.Encoder, permissions os.FileMode) *File {
+	return &File{
+		path:        path,
+		encoder:     encoder,
+		permissions: permissions,
 	}
 }
 
@@ -43,7 +61,7 @@ func (f *File) Dump(_ context.Context, values *map[string]any) error {
 		return fmt.Errorf("failed to encode values: %w", err)
 	}
 
-	if err := os.WriteFile(f.path, data, 0644); err != nil {
+	if err := os.WriteFile(f.path, data, f.permissions); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
