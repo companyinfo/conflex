@@ -25,7 +25,7 @@ jobs:
         cache-dependency-path: go.sum
 
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: go-fmt
       run: |
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go 1.23.x
       uses: actions/setup-go@v5
